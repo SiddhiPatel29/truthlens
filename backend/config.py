@@ -1,17 +1,52 @@
+"""
+Configuration Module for VeraMedia AI Backend.
+Loads environment variables and provides structured settings for Flask.
+"""
 import os
+import logging
 from dotenv import load_dotenv
 
-# Load settings from the .env file
+# Load settings from .env if present
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 class Config:
-    FLASK_ENV = os.getenv("FLASK_ENV", "development")
-    DEBUG = FLASK_ENV == "development"
-    PORT = int(os.getenv("PORT", 5000))
+    """Base application configuration loaded from environment variables."""
+    
+    FLASK_ENV = os.getenv("FLASK_ENV", "development").lower()
+    
+    # Flask 3.x uses FLASK_DEBUG; retain backwards-compatibility with FLASK_ENV
+    _env_debug = os.getenv("FLASK_DEBUG")
+    if _env_debug is not None:
+        DEBUG = _env_debug.strip() in ("1", "true", "True")
+    else:
+        DEBUG = FLASK_ENV == "development"
+
+    TESTING = os.getenv("TESTING", "0").strip() in ("1", "true", "True")
+
+    # Server Port
+    try:
+        PORT = int(os.getenv("PORT", "5000"))
+    except ValueError:
+        PORT = 5000
+
+    # Secret Key
     SECRET_KEY = os.getenv("SECRET_KEY", "default-dev-key")
-    
-    # Frontend URL (for security / CORS)
+
+    # Security check: prevent default secret key in production
+    if FLASK_ENV == "production" and (not SECRET_KEY or SECRET_KEY in ("default-dev-key", "dev_insecure_secret_key_change_in_production")):
+        raise ValueError(
+            "CRITICAL SECURITY CONFIGURATION ERROR: "
+            "A secure, non-default SECRET_KEY must be provided when running in production."
+        )
+
+    # Allowed origin for CORS (Frontend communication)
     CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "http://localhost:3000")
-    
-    # Max file upload size (50 Megabytes)
-    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH_MB", 50)) * 1024 * 1024
+
+    # Maximum upload payload size in bytes (defaults to 50 MB)
+    try:
+        _max_mb = int(os.getenv("MAX_CONTENT_LENGTH_MB", "50"))
+    except ValueError:
+        _max_mb = 50
+    MAX_CONTENT_LENGTH = _max_mb * 1024 * 1024

@@ -1,10 +1,12 @@
 """
 Abuse Dispatcher API Routes.
 """
+import logging
 from flask import Blueprint, request
 from backend.services.abuse_service import AbuseDispatcherService
 from backend.utils.response import api_response
 
+logger = logging.getLogger(__name__)
 abuse_bp = Blueprint("abuse", __name__)
 
 @abuse_bp.route("/report/abuse", methods=["POST"])
@@ -21,7 +23,7 @@ def dispatch_abuse_report():
     }
     """
     body = request.get_json(silent=True)
-    if not body:
+    if not body or not isinstance(body, dict):
         return api_response(
             success=False,
             message="Request body must be valid JSON.",
@@ -38,6 +40,7 @@ def dispatch_abuse_report():
             status_code=201
         )
     except ValueError as e:
+        logger.warning("Abuse report validation failed: %s", str(e))
         return api_response(
             success=False,
             message=str(e),
@@ -45,9 +48,10 @@ def dispatch_abuse_report():
             status_code=400
         )
     except Exception as e:
+        logger.exception("Unexpected error in abuse report generation: %s", str(e))
         return api_response(
             success=False,
-            message=f"Internal Error: {str(e)}",
+            message="An unexpected error occurred while processing the abuse report.",
             error_code="INTERNAL_SERVER_ERROR",
             status_code=500
         )

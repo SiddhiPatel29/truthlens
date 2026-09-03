@@ -1,10 +1,12 @@
 """
 Text Detection API Routes.
 """
+import logging
 from flask import Blueprint, request
 from backend.services.text_service import TextDetectionService
 from backend.utils.response import api_response
 
+logger = logging.getLogger(__name__)
 text_bp = Blueprint("text", __name__)
 
 @text_bp.route("/detect/text", methods=["POST"])
@@ -15,7 +17,7 @@ def detect_text():
     """
     body = request.get_json(silent=True)
     
-    if not body or "text" not in body:
+    if not body or not isinstance(body, dict) or "text" not in body:
         return api_response(
             success=False,
             message="Request body must contain a 'text' field.",
@@ -23,7 +25,14 @@ def detect_text():
             status_code=400
         )
 
-    input_text = body.get("text", "")
+    input_text = body.get("text")
+    if not isinstance(input_text, str):
+        return api_response(
+            success=False,
+            message="Field 'text' must be a valid string.",
+            error_code="INVALID_INPUT",
+            status_code=400
+        )
 
     if len(input_text.strip()) < 20:
         return api_response(
@@ -42,6 +51,7 @@ def detect_text():
             status_code=200
         )
     except ValueError as e:
+        logger.warning("Text processing validation failed: %s", str(e))
         return api_response(
             success=False,
             message=str(e),
@@ -49,6 +59,7 @@ def detect_text():
             status_code=400
         )
     except Exception as e:
+        logger.exception("Unexpected error in text detection: %s", str(e))
         return api_response(
             success=False,
             message="An error occurred while analyzing the text.",

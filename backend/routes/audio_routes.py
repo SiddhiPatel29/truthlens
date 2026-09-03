@@ -1,11 +1,13 @@
 """
 Audio Detection API Routes.
 """
+import logging
 from flask import Blueprint, request
 from backend.services.audio_service import AudioDetectionService
-from backend.utils.file_validator import allowed_file, ALLOWED_AUDIO_EXTENSIONS
+from backend.utils.file_validator import validate_audio_file
 from backend.utils.response import api_response
 
+logger = logging.getLogger(__name__)
 audio_bp = Blueprint("audio", __name__)
 
 @audio_bp.route("/detect/audio", methods=["POST"])
@@ -23,19 +25,13 @@ def detect_audio():
         )
 
     file = request.files["audio"]
-    if not file or file.filename == "":
-        return api_response(
-            success=False,
-            message="No audio file selected.",
-            error_code="INVALID_FILE",
-            status_code=400
-        )
+    is_valid, err_msg, err_code = validate_audio_file(file)
 
-    if not allowed_file(file.filename, ALLOWED_AUDIO_EXTENSIONS):
+    if not is_valid:
         return api_response(
             success=False,
-            message=f"Invalid audio format. Allowed: {', '.join(ALLOWED_AUDIO_EXTENSIONS)}",
-            error_code="INVALID_FORMAT",
+            message=err_msg,
+            error_code=err_code,
             status_code=400
         )
 
@@ -48,6 +44,7 @@ def detect_audio():
             status_code=200
         )
     except ValueError as e:
+        logger.warning("Audio processing validation failed: %s", str(e))
         return api_response(
             success=False,
             message=str(e),
@@ -55,9 +52,10 @@ def detect_audio():
             status_code=400
         )
     except Exception as e:
+        logger.exception("Unexpected error in audio detection: %s", str(e))
         return api_response(
             success=False,
-            message=f"Internal Error: {str(e)}",
+            message="An unexpected error occurred while analyzing the audio.",
             error_code="INTERNAL_SERVER_ERROR",
             status_code=500
         )
