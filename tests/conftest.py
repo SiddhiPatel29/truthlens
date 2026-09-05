@@ -6,6 +6,7 @@ import io
 import pytest
 from backend.app import create_app
 from backend.config import Config
+from backend.database import db as _db
 
 class TestConfig(Config):
     """Testing configuration overriding defaults."""
@@ -14,17 +15,40 @@ class TestConfig(Config):
     SECRET_KEY = "test-secret-key-for-unit-tests"
     CLIENT_ORIGIN = "http://localhost:3000"
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB for testing
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def app():
     """Creates an instance of the Flask application for testing."""
     app = create_app(TestConfig)
-    return app
+    with app.app_context():
+        _db.create_all()
+        yield app
+        _db.drop_all()
 
 @pytest.fixture
 def client(app):
     """Creates a test client for simulating HTTP requests."""
     return app.test_client()
+
+@pytest.fixture
+def db_session(app):
+    """
+    Provides an isolated database session per test with in-memory SQLite.
+    Rolls back any changes at the end of each test.
+    """
+    with app.app_context():
+        connection = _db.engine.connect()
+        transaction = connection.begin()
+        
+        # Bind session to transaction
+        session = _db.session
+        yield session
+
+        session.remove()
+        transaction.rollback()
+        connection.close()
 
 @pytest.fixture
 def sample_text():

@@ -1,6 +1,6 @@
 # Architectural & Technical Decisions Log
 
-This document records the foundational architectural and technical decisions made during Phase 1 of the VeraMedia AI backend development.
+This document records the foundational architectural and technical decisions made during backend development for the VeraMedia AI (`truthlens`) project.
 
 ---
 
@@ -50,9 +50,13 @@ Determine the active runtime Python environment (Python 3.13.7 on Windows x64) a
 - `opencv-python==4.11.0.86`
 - `scipy==1.15.2`
 - `pytest==8.3.4`
+- `SQLAlchemy==2.0.52`
+- `Flask-SQLAlchemy==3.1.1`
+- `alembic==1.19.2`
+- `Flask-Migrate==4.1.0`
 
 ### Reason
-Earlier audits revealed that `numpy`, `opencv-python`, and `scipy` were actively imported by the forensic services but completely absent from `requirements.txt`. Without pinning, automated deployment or fresh clones would break with runtime `ImportError` or install incompatible wheel versions on Python 3.13.
+Earlier audits revealed that `numpy`, `opencv-python`, and `scipy` were actively imported by the forensic services but completely absent from `requirements.txt`. Without pinning, automated deployment or fresh clones would break with runtime `ImportError` or install incompatible wheel versions on Python 3.13. In Phase 2, SQLAlchemy and Flask-Migrate were similarly pinned to tested releases.
 
 ### Alternatives Considered
 - **Open-ended version ranges (`>=`)**: Vulnerable to future breaking changes in upstream dependencies (especially with NumPy 2.x ABI changes affecting C extensions like OpenCV/SciPy).
@@ -73,7 +77,7 @@ Ensures project dependency hygiene, prevents conflicts with other system package
 
 ### Alternatives Considered
 - **Installing into the global Python environment**: Risk of polluting system packages, masking missing dependencies, or breaking system-level Python utilities.
-- **Docker containers in Phase 1**: Explicitly ruled out to avoid premature complexity on local Windows development before core stabilization.
+- **Docker containers in Phase 1/2**: Explicitly ruled out to avoid premature complexity on local Windows development before core stabilization.
 
 ### Why the Chosen Approach Was Preferred
 Standard Python `.venv` provides zero-overhead isolation, is natively supported across all platforms, and is already git-ignored.
@@ -86,27 +90,27 @@ Standard Python `.venv` provides zero-overhead isolation, is natively supported 
 Adopt `pytest` with a modular test suite organized in `tests/` utilizing standard fixtures in `conftest.py`.
 
 ### Reason
-`pytest` offers powerful fixture management, clean assert syntax without boilerplate subclasses, detailed diff output on failures, and fast execution speed (29 tests executed in ~1.04s).
+`pytest` offers powerful fixture management, clean assert syntax without boilerplate subclasses, detailed diff output on failures, and fast execution speed (41 tests executed in ~0.62s).
 
 ### Alternatives Considered
 - **Standard library `unittest`**: Functional, but requires verbose boilerplate classes (`self.assertEqual`) and awkward test discovery syntax.
 - **No automated test runner (relying on manual Postman/curl scripts)**: Prone to regressions, impossible to run automatically, and untrustworthy.
 
 ### Why the Chosen Approach Was Preferred
-`pytest` is the de facto Python industry standard. Its fixture pattern seamlessly integrates with Flask's test client (`client.get`, `client.post`).
+`pytest` is the de facto Python industry standard. Its fixture pattern seamlessly integrates with Flask's test client (`client.get`, `client.post`) and SQLAlchemy transaction rollbacks.
 
 ---
 
-## Decision 6: Preservation of Existing Forensic Signal Logic in Phase 1
+## Decision 6: Preservation of Existing Forensic Signal Logic in Phase 1 & 2
 
 ### Decision
-Retain existing heuristic forensic signal algorithms in `TextDetectionService`, `ImageDetectionService`, `VideoDetectionService`, and `AudioDetectionService` without attempting to replace them with large neural network models (e.g. CLIP, ResNet, Whisper) during Phase 1.
+Retain existing heuristic forensic signal algorithms in `TextDetectionService`, `ImageDetectionService`, `VideoDetectionService`, and `AudioDetectionService` without attempting to replace them with large neural network models (e.g. CLIP, ResNet, Whisper) during Phase 1 and Phase 2.
 
 ### Reason
-The goal of Phase 1 is establishing a clean, secure, and testable backend foundation. Replacing signal-processing logic with heavy deep learning weights would introduce huge model files (>2 GB), complex GPU/Torch dependencies, high latency, and cloud deployment complexity prematurely.
+The goal of Phase 1 and Phase 2 is establishing a clean, secure, and testable backend and database foundation. Replacing signal-processing logic with heavy deep learning weights would introduce huge model files (>2 GB), complex GPU/Torch dependencies, high latency, and cloud deployment complexity prematurely.
 
 ### Alternatives Considered
-- **Immediately downloading pre-trained PyTorch / HuggingFace deepfake models**: Would derail Phase 1 foundation goals, balloon dependency footprint, and introduce environment instability.
+- **Immediately downloading pre-trained PyTorch / HuggingFace deepfake models**: Would derail foundation goals, balloon dependency footprint, and introduce environment instability.
 - **Stubbing services with static mock data**: Would delete working signal processing logic already present in the codebase.
 
 ### Why the Chosen Approach Was Preferred
@@ -117,14 +121,14 @@ Preserving the existing mathematical heuristics (Laplacian variance, ZCR, bursti
 ## Decision 7: Refactoring File Validation into Shared Utilities without MIME/Magic-byte Overhaul
 
 ### Decision
-Consolidate media extension checking into `backend/utils/file_validator.py` (`validate_image_file`, `validate_video_file`, `validate_audio_file`) to eliminate duplicate validation code in routes, but defer magic-byte / MIME inspection (`python-magic`) to Phase 2.
+Consolidate media extension checking into `backend/utils/file_validator.py` (`validate_image_file`, `validate_video_file`, `validate_audio_file`) to eliminate duplicate validation code in routes, but defer magic-byte / MIME inspection (`python-magic`) to a later security hardening phase.
 
 ### Reason
-Routes were inconsistently validating filenames and extensions. Centralizing this logic into pure functions ensures DRY principles and consistent error codes (`MISSING_FILE`, `INVALID_FILE`, `INVALID_FORMAT`). Deferring binary magic-byte inspection adheres to the user instruction to avoid over-engineering file security until Phase 2.
+Routes were inconsistently validating filenames and extensions. Centralizing this logic into pure functions ensures DRY principles and consistent error codes (`MISSING_FILE`, `INVALID_FILE`, `INVALID_FORMAT`). Deferring binary magic-byte inspection adheres to the user instruction to avoid over-engineering file security until Phase 2 is stabilized.
 
 ### Alternatives Considered
 - **Leaving validation logic duplicated inside each route**: Hard to maintain, inconsistent error messages.
-- **Adding `python-magic` / `libmagic` in Phase 1**: `libmagic` requires external binary DLLs on Windows which often causes installation friction for beginners.
+- **Adding `python-magic` / `libmagic` in Phase 1/2**: `libmagic` requires external binary DLLs on Windows which often causes installation friction for beginners.
 
 ### Why the Chosen Approach Was Preferred
 Cleanly refactored Python utility functions provide immediate consistency without introducing difficult external native dependencies.
@@ -140,8 +144,93 @@ Replace `print()` and `traceback.print_exc()` with `logging.getLogger(__name__)`
 `print()` statements cannot be filtered by log level (DEBUG, INFO, WARNING, ERROR), lack timestamps, do not include module context, and mix stdout with diagnostic output. Standard logging allows production silencing of debug messages, structured formatting, and integration with log management tools.
 
 ### Alternatives Considered
-- **Leaving `print()` statements**: Unprofessional, insecure, difficult to manage in production.
-- **Heavy logging frameworks (e.g. Loguru, ELK stack integrations)**: Overkill for Phase 1.
+- **Leaving `print()` statements**: Insecure, difficult to manage in production.
+- **Heavy logging frameworks (e.g. Loguru, ELK stack integrations)**: Overkill for foundational phases.
 
 ### Why the Chosen Approach Was Preferred
 Python's built-in `logging` module is zero-dependency, robust, and standard across all Python backend architectures.
+
+---
+
+## Decision 9: SQLAlchemy 2.0 & Flask-SQLAlchemy 3.1 ORM for Persistence
+
+### Decision
+Adopt SQLAlchemy 2.0 via Flask-SQLAlchemy 3.1 to manage models, sessions, and relational mappings for `User`, `Scan`, `ScanResult`, and `AbuseReport`.
+
+### Reason
+SQLAlchemy provides battle-tested object-relational mapping, automatic connection pooling, unit-of-work transaction management, and portability between SQLite (local development and in-memory testing) and PostgreSQL (production).
+
+### Alternatives Considered
+- **Raw `sqlite3` queries**: No schema migrations, error-prone string query building, lack of relationship navigation, and difficult to migrate to PostgreSQL.
+- **Peewee / Tortoise ORM**: Lacks the deep ecosystem, Flask-Migrate integration, and enterprise-grade Alembic support of SQLAlchemy.
+
+### Why the Chosen Approach Was Preferred
+SQLAlchemy is the undisputed gold standard for Python web backends.
+
+---
+
+## Decision 10: Database Migrations via Flask-Migrate & Alembic (Batch Mode)
+
+### Decision
+Manage database schema versioning using Flask-Migrate with Alembic batch mode enabled.
+
+### Reason
+Database schemas evolve continuously. Tracking schema changes through versioned migration scripts allows zero-downtime upgrades, rollbacks, and team synchronization across different development environments without destroying data.
+
+### Alternatives Considered
+- **`db.create_all()` in production**: Cannot modify existing tables, rename columns, or apply schema changes without dropping and recreating the database.
+- **Manual SQL DDL upgrade scripts**: Prone to human omission and hard to verify across database dialects.
+
+### Why the Chosen Approach Was Preferred
+Flask-Migrate exposes standard CLI commands (`flask db init`, `flask db migrate`, `flask db upgrade`) and generates auto-migration scripts that inspect models against the database.
+
+---
+
+## Decision 11: SQLite Foreign Key Enforcement via Engine Connect Hook
+
+### Decision
+Attach an SQLAlchemy engine connect event listener in `backend/database/db.py` to issue `PRAGMA foreign_keys=ON;` whenever an SQLite connection is opened.
+
+### Reason
+By default in SQLite, `FOREIGN KEY` constraints are accepted in DDL syntax but ignored during DML execution unless explicitly enabled per-connection via PRAGMA. Without this hook, inserting records with invalid foreign keys would silently succeed, leading to orphaned records and corrupt relational integrity during development and testing.
+
+### Alternatives Considered
+- **Relying on application-level checks without DB constraints**: Brittle, bypassed by direct queries or subtle logic bugs.
+- **Only enforcing foreign keys when using PostgreSQL**: Masks bugs during local development and testing.
+
+### Why the Chosen Approach Was Preferred
+The connection hook ensures SQLite behaves like a real relational database, failing fast on invalid foreign keys in both unit tests and local runs.
+
+---
+
+## Decision 12: Nullable `Scan.user_id` and Public Endpoints in Phase 2
+
+### Decision
+Keep `Scan.user_id` nullable (`nullable=True`) and do not yet wire existing detection endpoints to write to the database.
+
+### Reason
+Phase 2 establishes the database foundation only. Authentication, JWT tokens, and user sessions are explicitly planned for Phase 3. Keeping `user_id` nullable allows the model to support both anonymous scans (for public demo use) and authenticated user scans (in Phase 3) without breaking existing detection API contracts.
+
+### Alternatives Considered
+- **Making `user_id` non-nullable immediately**: Would require creating fake mock users or blocking unauthenticated API usage prematurely.
+- **Immediately modifying detection routes to record scans**: Deviates from Phase 2 scope and risks introducing route regressions before authentication exists.
+
+### Why the Chosen Approach Was Preferred
+Preserves Phase 2 isolation and keeps detection endpoints decoupled until authentication and user context are formally implemented.
+
+---
+
+## Decision 13: Native JSON Column Type for Forensic Results and Dossier Manifests
+
+### Decision
+Use `db.JSON` for `ScanResult.result_data` and `AbuseReport.report_data`.
+
+### Reason
+Forensic analysis metrics (e.g. sentence breakdowns, Grad-CAM++ Base64 previews, lip-sync intervals, cryptographic manifests) vary across modalities (text vs image vs video vs audio). A structured JSON column provides maximum flexibility without requiring separate table schemas for every forensic modality.
+
+### Alternatives Considered
+- **Serialized string / Text column**: Requires manual `json.loads` / `json.dumps` across all query points and loses dialect-native JSON indexing in PostgreSQL.
+- **Separate normalized tables for each modality's metrics**: High schema complexity for prototype signal data that is still evolving.
+
+### Why the Chosen Approach Was Preferred
+`db.JSON` stores native Python dictionaries seamlessly, maps to JSONB in PostgreSQL, and stores valid JSON text in SQLite.

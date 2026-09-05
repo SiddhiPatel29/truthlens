@@ -285,7 +285,67 @@ Client receives HTTP 201 Created JSON Response
 
 ---
 
-## 7. Centralized Error Execution Flow (404, 405, 413, 500)
+## 7. Database Initialization & Session Lifecycle Flow
+
+```
+Application Startup / Test Context:
+  │
+  ▼
+[backend/app.py: create_app()]
+  1. Reads SQLALCHEMY_DATABASE_URI from Config (defaults to sqlite:///truthlens.db)
+  2. Calls db.init_app(app)
+  3. Calls migrate.init_app(app, db)
+  │
+  ▼
+[backend/database/db.py: enforce_sqlite_foreign_keys()]
+  On SQLite connection:
+  Executes "PRAGMA foreign_keys=ON;"
+  │
+  ▼
+[backend/database/models.py]
+  Declarative models registered:
+  - User (users table)
+  - Scan (scans table, user_id nullable foreign key)
+  - ScanResult (scan_results table, scan_id unique foreign key)
+  - AbuseReport (abuse_reports table, user_id and scan_id foreign keys)
+  │
+  ▼
+Session Lifecycle:
+  - Scoped sessions managed via db.session
+  - Unit tests use in-memory SQLite (sqlite:///:memory:) with automatic rollback
+  - Production/Dev uses instance/truthlens.db (or PostgreSQL in staging/production)
+```
+
+---
+
+## 8. Migration Execution Flow (Flask-Migrate + Alembic)
+
+```
+CLI Command: flask db upgrade
+  │
+  ▼
+[Flask-Migrate / Alembic Engine]
+  1. Inspects Alembic configuration in migrations/alembic.ini & migrations/env.py
+  2. Binds to app.config['SQLALCHEMY_DATABASE_URI']
+  3. Checks 'alembic_version' table in target database
+  4. Identifies pending revision: f3e901358e24 ("Initial database schema")
+  │
+  ▼
+[migrations/versions/f3e901358e24_initial_database_schema_users_scans_.py]
+  Executes upgrade():
+  - Creates table 'users' with unique index on 'email'
+  - Creates table 'scans' with index on 'user_id' and FK users.id (ON DELETE CASCADE)
+  - Creates table 'abuse_reports' with indexes on 'scan_id', 'user_id'
+  - Creates table 'scan_results' with unique index on 'scan_id' and FK scans.id (ON DELETE CASCADE)
+  - Records revision ID into 'alembic_version'
+  │
+  ▼
+Database is upgraded and schema matches SQLAlchemy declarative models
+```
+
+---
+
+## 9. Centralized Error Execution Flow (400, 404, 405, 413, 500)
 
 ```
 Client sends invalid or unhandled request:

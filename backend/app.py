@@ -5,6 +5,7 @@ import logging
 from flask import Flask
 from flask_cors import CORS
 from backend.config import Config
+from backend.database import db, migrate
 from backend.utils.errors import register_error_handlers
 from backend.routes.health_routes import health_bp
 from backend.routes.text_routes import text_bp
@@ -29,17 +30,21 @@ def create_app(config_class=Config):
     # 1. Configure logging
     configure_logging(app)
 
-    # 2. Enable CORS for frontend communication
+    # 2. Initialize Database & Migrations
+    db.init_app(app)
+    migrate.init_app(app, db)
+
+    # 3. Enable CORS for frontend communication
     CORS(
         app,
         resources={r"/api/*": {"origins": app.config.get("CLIENT_ORIGIN", "*")}},
         supports_credentials=True
     )
 
-    # 3. Register Centralized Error Handlers
+    # 4. Register Centralized Error Handlers
     register_error_handlers(app)
 
-    # 4. Register Blueprints (API Routes)
+    # 5. Register Blueprints (API Routes)
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(text_bp, url_prefix="/api")
     app.register_blueprint(image_bp, url_prefix="/api")

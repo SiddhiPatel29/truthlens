@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-04
-- **Result Summary**: 29 passed, 0 failed, 0 skipped in 1.04s
+- **Result Summary**: **41 passed, 0 failed, 0 skipped in 0.62s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -41,6 +41,18 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_abuse_report.py` | `test_dispatch_abuse_report_unsupported_platform` | Unsupported platform (`tiktok`) | **PASSED** | Returned HTTP 400 with `VALIDATION_ERROR` |
 | `test_abuse_report.py` | `test_dispatch_abuse_report_missing_target_url` | Missing target URL | **PASSED** | Returned HTTP 400 with `VALIDATION_ERROR` |
 | `test_abuse_report.py` | `test_dispatch_abuse_report_empty_or_invalid_json` | Non-JSON payload | **PASSED** | Returned HTTP 400 with `INVALID_JSON` |
+| `test_database.py` | `test_user_model_creation` | User model creation | **PASSED** | Inserted and retrieved User with timestamp |
+| `test_database.py` | `test_user_unique_email_constraint` | Unique email constraint | **PASSED** | Duplicate email raised `IntegrityError` |
+| `test_database.py` | `test_scan_model_creation_nullable_user` | Scan creation with null user | **PASSED** | Anonymous scan persisted with `user_id=None` |
+| `test_database.py` | `test_scan_result_model_creation` | ScanResult creation with JSON | **PASSED** | Persisted metrics and breakdown in JSON column |
+| `test_database.py` | `test_abuse_report_model_creation` | AbuseReport creation with JSON | **PASSED** | Persisted dossier manifest in JSON column |
+| `test_database.py` | `test_user_scans_relationship` | User → Scans (1-to-many) | **PASSED** | Scans linked via `user.scans` bidirectional |
+| `test_database.py` | `test_scan_scan_result_relationship` | Scan → ScanResult (1-to-1) | **PASSED** | Result linked via `scan.result` bidirectional |
+| `test_database.py` | `test_scan_abuse_reports_relationship` | Scan → AbuseReports (1-to-many) | **PASSED** | Reports linked via `scan.abuse_reports` |
+| `test_database.py` | `test_user_abuse_reports_relationship` | User → AbuseReports (1-to-many) | **PASSED** | Reports linked via `user.abuse_reports` |
+| `test_database.py` | `test_foreign_key_constraint_invalid_user_on_scan` | Foreign key enforcement | **PASSED** | Invalid `user_id` raised `IntegrityError` |
+| `test_database.py` | `test_foreign_key_constraint_invalid_scan_on_result` | Foreign key enforcement | **PASSED** | Invalid `scan_id` raised `IntegrityError` |
+| `test_database.py` | `test_migration_truthlens_db_schema` | Migration schema verification | **PASSED** | Verified all 4 tables + `alembic_version` in `truthlens.db` |
 
 ---
 
@@ -65,12 +77,14 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 ---
 
-## 3. Environment & Security Checks
+## 3. Database & Security Checks
 
 | Security Check | Verification Method | Status | Notes |
 | :--- | :--- | :---: | :--- |
 | `.env` file untracked | `git status` | **PASSED** | Verified `.env` is ignored by `.gitignore` |
 | `.env.example` trackable | `git status` | **PASSED** | Verified `.env.example` shows as untracked file ready for commit |
+| SQLite database files untracked | `git status` | **PASSED** | Verified `*.db`, `*.sqlite` ignored by `.gitignore` |
 | Production secret guard | Code inspection & unit logic | **PASSED** | `backend/config.py` raises `ValueError` in production if default secret used |
-| Virtualenv isolation | Directory and pip listing | **PASSED** | `.venv` is ignored by git and isolates all 8 required packages |
-| Exception sanitization | Live error injection | **PASSED** | Stack traces, file paths, and library assertions never sent to client |
+| Virtualenv isolation | Directory and pip listing | **PASSED** | `.venv` is ignored by git and isolates all 12 required packages |
+| SQLite foreign keys enforced | PRAGMA hook & test execution | **PASSED** | Invalid foreign keys raise `IntegrityError` |
+| Migration idempotency | `flask db upgrade` check | **PASSED** | Applied cleanly to `truthlens.db` |

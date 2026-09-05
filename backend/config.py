@@ -50,3 +50,12 @@ class Config:
     except ValueError:
         _max_mb = 50
     MAX_CONTENT_LENGTH = _max_mb * 1024 * 1024
+
+    # Database Configuration
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///truthlens.db")
+    # Normalize legacy postgres:// scheme to postgresql:// for SQLAlchemy 2.0
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
