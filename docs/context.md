@@ -33,10 +33,21 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 4. **Migrations**: Initialized `migrations/` with Flask-Migrate; generated initial revision `f3e901358e24`; successfully upgraded `instance/truthlens.db`.
 5. **Automated testing**: Created `tests/test_database.py` with 12 tests covering model creation, unique email constraint, 1-to-many and 1-to-1 relationships, foreign key enforcement, and migration schema verification. Total test suite expanded to **41 passed tests in 0.62s**.
 
+### Phase 3: Authentication & Identity Management (In Progress)
+1. **User Registration Implemented (Step 1)**:
+   - Created `backend/services/auth_service.py` (`AuthService`, `AuthValidationError`).
+   - Created `backend/routes/auth_routes.py` (`auth_bp` exposing `POST /api/auth/register`).
+   - Registered `auth_bp` in `backend/app.py` under `/api`.
+   - Used Werkzeug's built-in `generate_password_hash` (`scrypt`) and pinned `Werkzeug==3.1.8` in `requirements.txt`.
+   - Implemented modern password policy: 12-128 characters, no mandatory composition rules, spaces and Unicode allowed/preserved, local weak-password blocklist (`WEAK_PASSWORD`). (Local blocklist only; no external breached-password check).
+   - Implemented validation for required name, valid email, email normalization (`strip().lower()`), and duplicate email rejection.
+   - Preserved response envelope returning `{ id, name, email }` without exposing `password_hash`.
+   - Added 25 unit and integration tests in `tests/test_auth_registration.py`. Total test suite expanded to **66 passed tests in 2.43s**.
+
 ---
 
 ## 3. Currently Being Worked On
-- Phase 2 is fully complete and verified. The database foundation, migrations, and test suite are production-ready.
+- Phase 3 Step 1 (User Registration & Password Hashing) is complete and verified. Ready for Step 2 (User Login & JWT Issuance).
 
 ---
 
@@ -44,31 +55,26 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Application Factory (`create_app`)**: Allows flexible testing with `TestConfig` (in-memory SQLite `sqlite:///:memory:`) and dynamic configuration.
 - **SQLAlchemy 2.0 & Flask-Migrate**: Portable ORM with versioned Alembic batch migrations.
 - **SQLite Foreign Key Enforcement**: Enforced via SQLAlchemy engine connect event hook executing `PRAGMA foreign_keys=ON`.
+- **Werkzeug `scrypt` Password Hashing**: Built-in, zero-dependency, highly secure memory-hard password hashing.
 - **Nullable `Scan.user_id`**: Allows the scan model to support both anonymous scans (public demo) and authenticated user scans in Phase 3.
-- **Pure Forensic Services**: Services in `backend/services/` remain decoupled from database sessions for high testability.
+- **Pure Forensic & Auth Services**: Services in `backend/services/` encapsulate validation and business logic cleanly.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
 
 ## 5. Known Limitations & Remaining Problems
-1. **No Authentication / JWT**: Endpoints remain unauthenticated; user registration and login endpoints are deferred to Phase 3.
-2. **Stateless Detection Endpoints**: Detection endpoints compute and return results directly to the client but do not yet persist scan records to the database (deferred to Phase 3).
+1. **No Login / JWT Yet**: Registration is implemented, but user login (`POST /api/auth/login`) and JWT token verification are deferred to Step 2.
+2. **Stateless Detection Endpoints**: Detection endpoints compute and return results directly to the client but do not yet persist scan records to the database (deferred until auth is complete).
 3. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
 4. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening.
 5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
 
 ---
 
-## 6. Recommended Next Backend Task (Phase 3)
-Implement **Phase 3: User Authentication & Scan History Persistence**:
-1. Implement password hashing utilities (e.g. `passlib[bcrypt]` or `werkzeug.security`).
-2. Build JWT token generation and verification services (access & refresh tokens).
-3. Create authentication endpoints:
-   - `POST /api/auth/register` (name, email, password)
-   - `POST /api/auth/login` (email, password) -> JWT token
-   - `GET /api/auth/me` -> current user profile
-4. Create an `@auth_optional` / `@auth_required` decorator for route protection.
-5. Wire detection endpoints (`/api/detect/*`) to persist `Scan` and `ScanResult` records in the database, associating with `user_id` if authenticated.
-6. Create scan history endpoints:
-   - `GET /api/scans` (list user's previous scans)
-   - `GET /api/scans/<id>` (get specific scan result details)
+## 6. Recommended Next Backend Task (Phase 3 — Step 2)
+Implement **Phase 3 Step 2: User Login & JWT Token Issuance**:
+1. Add JWT dependency (e.g. `PyJWT` or `flask-jwt-extended`).
+2. Add `POST /api/auth/login` validating credentials against `check_password_hash`.
+3. Issue signed JWT access tokens containing user identity claims (`sub`, `email`).
+4. Implement an `@auth_required` decorator to validate incoming `Bearer <token>` headers.
+5. Add `GET /api/auth/me` to return current authenticated user profile.

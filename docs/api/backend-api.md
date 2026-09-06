@@ -412,7 +412,117 @@ None.
 
 ---
 
-## 7. Global Framework Errors
+## 7. User Registration
+
+- **Method**: `POST`
+- **Path**: `/api/auth/register`
+- **Authentication**: None (Public)
+- **Service Called**: `AuthService.register_user`
+- **Request Headers**: `Content-Type: application/json`
+- **Request Body**:
+```json
+{
+  "name": "Alice Smith",
+  "email": "alice@example.com",
+  "password": "StrongPassword123"
+}
+```
+
+### Validation Rules
+1. Request body must be a valid JSON object.
+2. `name`: Required, non-empty string.
+3. `email`: Required, valid email format (e.g. `user@domain.com`). Automatically normalized to lowercase and trimmed of leading/trailing whitespace.
+4. `password`:
+   - Length: Minimum 12 characters, maximum 128 characters.
+   - Composition: No mandatory uppercase, lowercase, digits, or special characters. Passphrases, spaces, and Unicode characters are fully allowed and preserved.
+   - Design rationale: Prioritizes password length and weak-password blocking rather than arbitrary character-composition rules (aligning with NIST SP 800-63B guidelines).
+   - Weak password protection: Obvious/common weak passwords (e.g. `password`, `123456789012`, `admin123`) are rejected via an internal blocklist (evaluated case-insensitively and ignoring surrounding whitespace).
+   - *Note on Breached Passwords*: The service currently relies on an internal local weak-password blocklist; it does **not** query external breached-password databases (e.g., HaveIBeenPwned). Full breached-password detection may be integrated in future security phases.
+5. Unique email: Registration is rejected if an account with the normalized email already exists.
+6. Security: Plaintext password is never stored or logged. Encrypted with Werkzeug `scrypt` hash (surrounding and internal whitespace preserved). Response never exposes `password_hash`.
+
+### Success Response (`201 Created`)
+```json
+{
+  "success": true,
+  "message": "User registered successfully.",
+  "data": {
+    "id": 1,
+    "name": "Alice Smith",
+    "email": "alice@example.com"
+  },
+  "error_code": null
+}
+```
+
+### Error Responses
+- **Missing or empty required field (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Field 'name' is required.",
+    "data": null,
+    "error_code": "MISSING_FIELD"
+  }
+  ```
+- **Invalid email format (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid email address format.",
+    "data": null,
+    "error_code": "INVALID_EMAIL"
+  }
+  ```
+- **Password too short (< 12 characters) (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Password must be at least 12 characters long.",
+    "data": null,
+    "error_code": "PASSWORD_TOO_SHORT"
+  }
+  ```
+- **Password too long (> 128 characters) (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Password must not exceed 128 characters.",
+    "data": null,
+    "error_code": "PASSWORD_TOO_LONG"
+  }
+  ```
+- **Weak / Common password rejected (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "The password provided is too common or easily guessable.",
+    "data": null,
+    "error_code": "WEAK_PASSWORD"
+  }
+  ```
+- **Duplicate email address (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An account with this email already exists.",
+    "data": null,
+    "error_code": "EMAIL_ALREADY_REGISTERED"
+  }
+  ```
+- **Malformed / Non-JSON payload (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Request body must be valid JSON.",
+    "data": null,
+    "error_code": "INVALID_JSON"
+  }
+  ```
+
+---
+
+## 8. Global Framework Errors
 
 | HTTP Status | Error Code | Example Trigger | Message |
 | :--- | :--- | :--- | :--- |
@@ -421,3 +531,4 @@ None.
 | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | `GET /api/detect/text` | `"The HTTP method is not allowed for this endpoint."` |
 | `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | File upload > 50 MB | `"Request payload exceeds maximum permitted file size."` |
 | `500 Internal Server Error` | `INTERNAL_SERVER_ERROR` | Unhandled server exception | `"An unexpected internal server error occurred."` |
+

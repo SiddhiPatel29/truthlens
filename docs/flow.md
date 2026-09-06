@@ -281,11 +281,79 @@ Body:
   │
   ▼
 Client receives HTTP 201 Created JSON Response
+---
+
+## 7. User Registration Flow (`POST /api/auth/register`)
+
+```
+Client HTTP Request: POST /api/auth/register
+Headers: Content-Type: application/json
+Body:
+{
+  "name": "Alice Smith",
+  "email": "Alice.Smith@example.com",
+  "password": "StrongPassword123"
+}
+  │
+  ▼
+[backend/app.py: create_app]
+  Routes to auth_bp
+  │
+  ▼
+[backend/routes/auth_routes.py: register()]
+  1. Checks request.get_json(silent=True)
+     - If body is None or not dict:
+       Returns api_response(False, "Request body must be valid JSON.", None, "INVALID_JSON", 400)
+  │
+  ▼
+[backend/services/auth_service.py: AuthService.register_user(body)]
+  1. Name Validation:
+     - Verifies name is non-empty string; strips surrounding whitespace
+     - If invalid: raises AuthValidationError("Field 'name' is required.", "MISSING_FIELD")
+  2. Email Validation & Normalization:
+     - Verifies email is non-empty string
+     - Normalizes: raw_email.strip().lower() -> "alice.smith@example.com"
+     - Validates against regex: r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+     - If invalid: raises AuthValidationError("Invalid email address format.", "INVALID_EMAIL")
+  3. Password Validation:
+     - Verifies password is a non-empty string
+     - Checks minimum length: len(password) >= 12 (raises AuthValidationError with "PASSWORD_TOO_SHORT" if < 12)
+     - Checks maximum length: len(password) <= 128 (raises AuthValidationError with "PASSWORD_TOO_LONG" if > 128)
+     - Checks weak-password blocklist: evaluates password.strip().lower() against local blocklist (raises AuthValidationError with "WEAK_PASSWORD" if matched)
+     - No arbitrary composition constraints; spaces and Unicode are accepted and preserved
+  4. Duplicate Check:
+     - Queries User.query.filter_by(email=normalized_email).first()
+     - If user exists: raises AuthValidationError("An account with this email already exists.", "EMAIL_ALREADY_REGISTERED")
+  5. Password Hashing:
+     - Generates hash: werkzeug.security.generate_password_hash(password) preserving raw unstripped password
+     - Plaintext password is never stored or logged
+  6. Persistence:
+     - Instantiates User(name=clean_name, email=normalized_email, password_hash=password_hash, is_active=True)
+     - Calls db.session.add(user) and db.session.commit()
+  7. Returns safe user dictionary: { "id": user.id, "name": user.name, "email": user.email }
+  │
+  ▼
+[backend/routes/auth_routes.py: register()]
+  Catches AuthValidationError -> returns api_response(False, e.message, None, e.error_code, 400)
+  Catches Exception           -> logs traceback via logger.exception(), returns sanitized 500 error
+  On success:
+  │
+  ▼
+[backend/utils/response.py: api_response()]
+  Returns jsonify({
+    "success": True,
+    "message": "User registered successfully.",
+    "data": { "id": 1, "name": "Alice Smith", "email": "alice.smith@example.com" },
+    "error_code": None
+  }), 201
+  │
+  ▼
+Client receives HTTP 201 Created JSON Response
 ```
 
 ---
 
-## 7. Database Initialization & Session Lifecycle Flow
+## 8. Database Initialization & Session Lifecycle Flow
 
 ```
 Application Startup / Test Context:
@@ -318,7 +386,7 @@ Session Lifecycle:
 
 ---
 
-## 8. Migration Execution Flow (Flask-Migrate + Alembic)
+## 9. Migration Execution Flow (Flask-Migrate + Alembic)
 
 ```
 CLI Command: flask db upgrade
@@ -345,7 +413,7 @@ Database is upgraded and schema matches SQLAlchemy declarative models
 
 ---
 
-## 9. Centralized Error Execution Flow (400, 404, 405, 413, 500)
+## 10. Centralized Error Execution Flow (400, 404, 405, 413, 500)
 
 ```
 Client sends invalid or unhandled request:

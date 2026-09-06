@@ -234,3 +234,40 @@ Forensic analysis metrics (e.g. sentence breakdowns, Grad-CAM++ Base64 previews,
 
 ### Why the Chosen Approach Was Preferred
 `db.JSON` stores native Python dictionaries seamlessly, maps to JSONB in PostgreSQL, and stores valid JSON text in SQLite.
+
+---
+
+## Decision 14: Werkzeug Password Hashing (`scrypt`) over External Cryptographic Libraries
+
+### Decision
+Use `werkzeug.security.generate_password_hash` and `werkzeug.security.check_password_hash` for password security, explicitly pinning `Werkzeug==3.1.8` in `requirements.txt`.
+
+### Reason
+Werkzeug is a core dependency of Flask and is already installed in the environment. In Werkzeug 3.x, `generate_password_hash` defaults to `scrypt`, an advanced memory-hard key derivation function recommended by NIST and OWASP for password storage. It provides excellent resistance against GPU/ASIC hardware-accelerated brute-force attacks.
+
+### Alternatives Considered
+- **`passlib` / `bcrypt`**: Adds external dependencies with binary C extensions that often cause build/wheel installation issues on different platforms (especially Windows with Python 3.13). Furthermore, `passlib` has been unmaintained for several years and issues deprecation warnings with modern Python versions.
+- **`argon2-cffi`**: Highly secure, but introduces third-party CFFI bindings and extra packages when Werkzeug's built-in `scrypt` already meets all enterprise security standards.
+
+### Why the Chosen Approach Was Preferred
+Zero new dependencies, no CFFI build complications, natively bundled with Flask/Werkzeug, and provides industry-standard `scrypt` hashing out of the box.
+
+---
+
+## Decision 15: Modern Password Policy (Length & Weakness Protection over Composition Rules)
+
+### Decision
+Enforce a password policy based on length (12 to 128 characters) and an internal weak-password blocklist rather than arbitrary character-composition rules (e.g., no mandatory uppercase, lowercase, numbers, or special characters). Spaces and Unicode characters are permitted and preserved. Obvious/common weak passwords (e.g. `password`, `123456789012`, `admin123`) are rejected via a local blocklist evaluated case-insensitively and ignoring surrounding whitespace (`WEAK_PASSWORD`).
+
+### Reason
+In alignment with modern identity security guidelines (such as NIST SP 800-63B), password length and resistance to dictionary/credential-stuffing attacks provide far greater entropy and security than arbitrary composition rules. Mandatory composition rules frequently encourage predictable substitutions (such as `P@ssword1!`), whereas passphrases (e.g. `this is a long secure passphrase`) offer high entropy and usability. A maximum bound of 128 characters prevents algorithmic denial-of-service (DoS) attacks on CPU-intensive hash functions (`scrypt`).
+
+### Distinction: Local Blocklist vs. Breached-Password Detection
+- **Current implementation**: An in-memory local blocklist of common and easily guessable passwords checked synchronously at zero latency with zero external dependencies.
+- **Future phase considerations**: Full breached-password detection (e.g. HaveIBeenPwned k-anonymity API) may be introduced in a future security phase as an optional microservice or background validator. The current architecture strictly avoids external network dependencies in registration.
+
+### Alternatives Considered
+- **Strict character composition regex (e.g., `(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])`)**: Rejected because NIST SP 800-63B advises against arbitrary character composition rules, as they frustrate users and result in predictable patterns.
+- **Full external HaveIBeenPwned API check in Phase 3 Step 1**: Rejected to keep registration offline, resilient, fast, and free of external runtime dependencies.
+- **Stripping whitespace before hashing**: Rejected. Trimming leading/trailing whitespace from the actual password alters user intent; spaces inside and around passphrases are preserved in the hash. Whitespace is only stripped during blocklist comparison.
+

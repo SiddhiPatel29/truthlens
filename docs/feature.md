@@ -116,3 +116,34 @@ This document records the features implemented during each development phase of 
 - **Tests**:
   - Complete test suite: 41 passed out of 41 tests in 0.62s.
 - **Current Status**: Complete.
+
+---
+
+## Phase 3: Authentication & Identity Management
+
+### Feature 10: Secure User Registration & Password Hashing (Step 1)
+- **Feature**: User registration endpoint (`POST /api/auth/register`) with cryptographic password hashing and modern password policy.
+- **Reason**: Enable new users to register accounts securely with email normalization, modern password length and weak-password protection, and duplicate rejection.
+- **Files Changed**:
+  - `requirements.txt` (Pinned `Werkzeug==3.1.8`)
+  - `backend/services/auth_service.py` (New - `AuthService` registration logic, modern password validation, and `AuthValidationError`)
+  - `backend/routes/auth_routes.py` (New - `auth_bp` blueprint with `POST /api/auth/register`)
+  - `backend/app.py` (Registered `auth_bp` blueprint under `/api`)
+  - `tests/test_auth_registration.py` (New - 25 comprehensive registration & password policy tests)
+- **Implementation**:
+  - Validates JSON payload existence, required non-empty `name`, required valid `email`.
+  - Normalizes email (`strip().lower()`).
+  - Enforces duplicate email rejection with safe client error (`EMAIL_ALREADY_REGISTERED`).
+  - **Modern Password Policy**:
+    - Length: 12 to 128 characters (`PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`).
+    - Composition: No mandatory uppercase, lowercase, numbers, or special characters. Spaces and Unicode characters are accepted and preserved.
+    - Weak password blocklist: Local list of obvious/common passwords evaluated case-insensitively and ignoring surrounding whitespace (`WEAK_PASSWORD`). (Local blocklist only; no external breached-password dependencies).
+  - Hashes passwords using Werkzeug's secure `generate_password_hash` (`scrypt`). Plaintext is never stored or logged. Unstripped raw passwords are preserved for hashing.
+  - Persists new `User` record to database.
+  - Returns `201 Created` with standard envelope containing safe user dictionary (`id`, `name`, `email`), omitting `password_hash`.
+- **Tests**:
+  - `tests/test_auth_registration.py` (25 tests passed).
+  - Complete test suite: 66 passed out of 66 tests.
+- **Current Status**: Complete.
+
+

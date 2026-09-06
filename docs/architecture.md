@@ -26,13 +26,15 @@ truthlens/
 │   │   ├── image_routes.py     # POST /api/detect/image
 │   │   ├── video_routes.py     # POST /api/detect/video
 │   │   ├── audio_routes.py     # POST /api/detect/audio
-│   │   └── abuse_routes.py     # POST /api/report/abuse
+│   │   ├── abuse_routes.py     # POST /api/report/abuse
+│   │   └── auth_routes.py      # POST /api/auth/register
 │   ├── services/               # Pure forensic and business logic (no Flask request dependencies)
 │   │   ├── text_service.py     # Text burstiness, perplexity, and repetition heuristics
 │   │   ├── image_service.py    # Laplacian variance, Grad-CAM++ heatmap simulation (OpenCV)
 │   │   ├── video_service.py    # Keyframe extraction, anomaly scoring, temporal variance (OpenCV)
 │   │   ├── audio_service.py    # Zero-crossing rate, spectral energy, lip-sync desync (SciPy)
-│   │   └── abuse_service.py    # Cryptographic SHA-256 fingerprinting & dossier builder
+│   │   ├── abuse_service.py    # Cryptographic SHA-256 fingerprinting & dossier builder
+│   │   └── auth_service.py     # User registration, email normalization, scrypt password hashing
 │   └── utils/                  # Reusable cross-cutting utilities
 │       ├── errors.py           # Centralized error handlers for 400, 404, 405, 413, 500
 │       ├── file_validator.py   # Uploaded media extension and filename validation
@@ -51,7 +53,8 @@ truthlens/
 │   ├── test_video_detection.py
 │   ├── test_audio_detection.py
 │   ├── test_abuse_report.py
-│   └── test_database.py        # Database models, constraints, relationships, and migration tests
+│   ├── test_database.py        # Database models, constraints, relationships, and migration tests
+│   └── test_auth_registration.py # User registration and password hashing tests
 ├── .env.example                # Safe environment configuration template
 ├── requirements.txt            # Pinned production, database, and test dependencies
 └── test.{jpg,mp4,wav}          # Local multimodal test media assets
@@ -169,6 +172,8 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
   Reads WAV audio streams using `scipy.io.wavfile`, computes Zero Crossing Rate (ZCR) and spectral energy variance, and flags temporal lip-sync discrepancy windows. Cleans up temporary disk files in a `finally` block.
 - **`AbuseDispatcherService`**:
   Validates target takedown platform (YouTube, X, Meta, Custom), generates a unique report UUID, computes a deterministic SHA-256 cryptographic digest of the manifest, maps the target platform to its compliance channel, and formats a takedown dossier.
+- **`AuthService`**:
+  Validates registration parameters, normalizes email addresses (`strip().lower()`), verifies modern password policy (12–128 characters, no mandatory composition rules, whitespace/Unicode allowed, local weak-password blocklist), performs duplicate email checks, hashes passwords securely using Werkzeug's `generate_password_hash` (`scrypt`), and persists `User` records in the database. Plaintext passwords are never stored or logged.
 
 ---
 
@@ -202,3 +207,4 @@ Located in `backend/utils/`:
 - **Flask-SQLAlchemy (3.1.1)**: Flask extension for SQLAlchemy.
 - **Alembic (1.19.2)**: Database migration engine.
 - **Flask-Migrate (4.1.0)**: Flask extension for Alembic database migrations.
+- **Werkzeug (3.1.8)**: WSGI web server utility and cryptographic password hashing (`scrypt`).
