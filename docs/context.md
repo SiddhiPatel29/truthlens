@@ -55,12 +55,20 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
      - Issues signed HS256 JWT access token with minimal claims (`sub`, `iat`, `exp`).
    - Added `verify_token` helper to decode and validate tokens against expiration and signature.
    - Implemented `POST /api/auth/login` in `backend/routes/auth_routes.py`.
-   - Created `tests/test_auth_login.py` with 23 comprehensive tests. Total test suite expanded to **89 passed tests in 5.09s**.
+   - Created `tests/test_auth_login.py` with 23 comprehensive tests.
+3. **JWT Authorization & Protected Route Verification (Step 3)**:
+   - Created `backend/utils/auth.py` providing the `@require_auth` decorator.
+   - Enforced standard claims `['sub', 'iat', 'exp']` centrally in `AuthService.verify_token()`.
+   - Bound validated integer user ID to `g.current_user_id` without query overhead.
+   - Standardized 401 error codes (`AUTHENTICATION_REQUIRED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`).
+   - Preserved centralized error handlers so unhandled server errors return HTTP 500 without masking.
+   - Added `GET /api/auth/me` returning `{ "user_id": g.current_user_id }`.
+   - Created `tests/test_auth_authorization.py` with 23 comprehensive tests. Total test suite expanded to **112 passed tests in 10.02s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 3 Step 2 (User Login & JWT Authentication) is complete and verified. Ready for Phase 3 Step 3 (Authorization Decorator / Middleware `@auth_required` and protected endpoints).
+- Phase 3 Step 3 (JWT Authorization & Protected Route Verification) is complete and verified. Ready for user commit and subsequent Phase 4 work (scan persistence & history).
 
 ---
 
@@ -71,25 +79,25 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Werkzeug `scrypt` Password Hashing**: Built-in, zero-dependency, highly secure memory-hard password hashing.
 - **Stateless JWT Tokens (`PyJWT`)**: HS256 signed access tokens with minimal claims (`sub`, `iat`, `exp`) and 24-hour expiration.
 - **Anti-Enumeration Login Security**: Generic HTTP 401 (`INVALID_CREDENTIALS`) for all authentication failures prevents account/email discovery.
-- **Nullable `Scan.user_id`**: Allows the scan model to support both anonymous scans (public demo) and authenticated user scans in Phase 3.
+- **Stateless Authorization Decorator (`@require_auth`)**: Pure cryptographic verification without DB hits; binds integer user ID to `g.current_user_id`.
+- **Nullable `Scan.user_id`**: Allows the scan model to support both anonymous scans (public demo) and authenticated user scans in Phase 4.
 - **Pure Forensic & Auth Services**: Services in `backend/services/` encapsulate validation and business logic cleanly.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
 
 ## 5. Known Limitations & Remaining Problems
-1. **No Login / JWT Yet**: Registration is implemented, but user login (`POST /api/auth/login`) and JWT token verification are deferred to Step 2.
-2. **Stateless Detection Endpoints**: Detection endpoints compute and return results directly to the client but do not yet persist scan records to the database (deferred until auth is complete).
-3. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
-4. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening.
-5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+1. **Stateless Detection Endpoints**: Detection endpoints compute and return results directly to the client but do not yet persist scan records to the database (deferred to Phase 4).
+2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
+3. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening.
+4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
-## 6. Recommended Next Backend Task (Phase 3 — Step 2)
-Implement **Phase 3 Step 2: User Login & JWT Token Issuance**:
-1. Add JWT dependency (e.g. `PyJWT` or `flask-jwt-extended`).
-2. Add `POST /api/auth/login` validating credentials against `check_password_hash`.
-3. Issue signed JWT access tokens containing user identity claims (`sub`, `email`).
-4. Implement an `@auth_required` decorator to validate incoming `Bearer <token>` headers.
-5. Add `GET /api/auth/me` to return current authenticated user profile.
+## 6. Recommended Next Backend Task (Phase 4 — Scan Persistence & History)
+Implement **Phase 4: Scan Persistence & History**:
+1. Connect authenticated requests to `Scan` records using `g.current_user_id`.
+2. Persist `Scan` and `ScanResult` rows to database upon completed forensic detection.
+3. Add `GET /api/scans` (protected by `@require_auth`) for user scan history.
+4. Add `GET /api/scans/<id>` for retrieving historical scan details.

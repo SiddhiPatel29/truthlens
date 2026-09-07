@@ -424,7 +424,67 @@ Client receives HTTP 200 OK with Bearer access token
 
 ---
 
-## 9. Database Initialization & Session Lifecycle Flow
+## 9. Protected Route Authorization Flow (`GET /api/auth/me`)
+
+```
+Client HTTP Request: GET /api/auth/me
+Headers: Authorization: Bearer <access_token>
+  │
+  ▼
+[backend/app.py: create_app]
+  Routes to auth_bp
+  │
+  ▼
+[backend/utils/auth.py: @require_auth decorator]
+  1. Authorization Header Extraction:
+     - Extracts request.headers.get("Authorization")
+     - If missing or empty: returns api_response(False, "Authentication required.", None, "AUTHENTICATION_REQUIRED", 401)
+  │
+  ▼
+  2. Bearer Scheme Validation:
+     - Splits header into parts: split(None, 1)
+     - Validates format matches "Bearer <token>"
+     - If not Bearer or empty token: returns api_response(False, "Authentication required.", None, "AUTHENTICATION_REQUIRED", 401)
+  │
+  ▼
+  3. Token Verification via AuthService:
+     [backend/services/auth_service.py: AuthService.verify_token(token)]
+     - Decodes JWT using configured JWT_SECRET_KEY and HS256
+     - Enforces standard claims requirement: options={"require": ["sub", "iat", "exp"]}
+     - Checks expiration: raises jwt.ExpiredSignatureError if exp < now
+     - Checks signature and claim integrity: raises jwt.InvalidTokenError if tampered or missing
+  │
+  ▼
+  4. Claim Validation & Context Binding:
+     - If jwt.ExpiredSignatureError: returns api_response(False, "Authentication token has expired.", None, "TOKEN_EXPIRED", 401)
+     - If jwt.InvalidTokenError: returns api_response(False, "Invalid authentication token.", None, "INVALID_TOKEN", 401)
+     - Validates payload["sub"] as positive integer
+     - Binds user ID to request context: g.current_user_id = int(payload["sub"])
+  │
+  ▼
+[backend/routes/auth_routes.py: get_current_user()]
+  - Invokes protected route function
+  - Accesses g.current_user_id
+  - Wraps response via api_response(True, "Authenticated user.", {"user_id": g.current_user_id}, None, 200)
+  │
+  ▼
+[backend/utils/response.py: api_response()]
+  Returns jsonify({
+    "success": True,
+    "message": "Authenticated user.",
+    "data": {
+      "user_id": 1
+    },
+    "error_code": None
+  }), 200
+  │
+  ▼
+Client receives HTTP 200 OK with authenticated user_id
+```
+
+---
+
+## 10. Database Initialization & Session Lifecycle Flow
 
 ```
 Application Startup / Test Context:
@@ -457,7 +517,7 @@ Session Lifecycle:
 
 ---
 
-## 10. Migration Execution Flow (Flask-Migrate + Alembic)
+## 11. Migration Execution Flow (Flask-Migrate + Alembic)
 
 ```
 CLI Command: flask db upgrade
@@ -484,7 +544,7 @@ Database is upgraded and schema matches SQLAlchemy declarative models
 
 ---
 
-## 11. Centralized Error Execution Flow (400, 404, 405, 413, 500)
+## 12. Centralized Error Execution Flow (400, 401, 404, 405, 413, 500)
 
 ```
 Client sends invalid or unhandled request:
@@ -510,3 +570,4 @@ Client sends invalid or unhandled request:
   ▼
 Client receives uniform JSON envelope with exact status code and zero internal info leakage
 ```
+

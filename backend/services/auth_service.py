@@ -203,13 +203,20 @@ class AuthService:
     def verify_token(cls, token: str) -> dict:
         """
         Decodes and validates a signed JWT token using the configured secret key.
+        Enforces token signature, expiration ('exp'), and required standard claims
+        ('sub', 'iat', 'exp').
 
         Returns:
             dict: The decoded token claims (e.g. sub, iat, exp).
 
         Raises:
             jwt.ExpiredSignatureError: If the token has expired.
-            jwt.InvalidTokenError: If the token signature or format is invalid.
+            jwt.InvalidTokenError: If the token signature, format, or required claims are invalid.
         """
         secret_key = current_app.config.get("JWT_SECRET_KEY")
-        return jwt.decode(token, secret_key, algorithms=["HS256"])
+        return jwt.decode(
+            token,
+            secret_key,
+            algorithms=["HS256"],
+            options={"require": ["sub", "iat", "exp"]}
+        )

@@ -590,11 +590,74 @@ None.
 
 ---
 
-## 9. Global Framework Errors
+## 9. Authenticated User Identity Verification
+
+- **Method**: `GET`
+- **Path**: `/api/auth/me`
+- **Authentication**: Required (`Authorization: Bearer <JWT>`)
+- **Service Called**: Controller decorated with `@require_auth`
+- **Request Headers**:
+  - `Authorization`: `Bearer <access_token>`
+- **Request Body**: None
+
+### Authorization Rules
+1. Client must send HTTP `Authorization` header in format `Bearer <access_token>`.
+2. Missing, empty, or non-Bearer headers return HTTP 401 with `AUTHENTICATION_REQUIRED`.
+3. Expired tokens return HTTP 401 with `TOKEN_EXPIRED`.
+4. Tampered, bad signature, malformed, or tokens missing required standard claims (`sub`, `iat`, `exp`) return HTTP 401 with `INVALID_TOKEN`.
+5. Authenticated user ID is extracted from `sub` and bound to `g.current_user_id`.
+6. Does not query database per request; operates statelessly.
+7. Does not expose `password_hash`, `password`, or sensitive system secrets.
+
+### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Authenticated user.",
+  "data": {
+    "user_id": 1
+  },
+  "error_code": null
+}
+```
+
+### Error Responses
+- **Missing or malformed Authorization header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid token / Tampered signature / Missing claims (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
+
+---
+
+## 10. Global Framework Errors
 
 | HTTP Status | Error Code | Example Trigger | Message |
 | :--- | :--- | :--- | :--- |
 | `400 Bad Request` | `BAD_REQUEST` | Malformed multipart/form-data | `"Bad request or malformed payload."` |
+| `401 Unauthorized` | `AUTHENTICATION_REQUIRED` / `INVALID_TOKEN` / `TOKEN_EXPIRED` | Protected route missing or invalid token | `"Authentication required."` / `"Invalid authentication token."` |
 | `404 Not Found` | `NOT_FOUND` | `GET /api/unknown-endpoint` | `"The requested resource was not found on this server."` |
 | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | `GET /api/detect/text` | `"The HTTP method is not allowed for this endpoint."` |
 | `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | File upload > 50 MB | `"Request payload exceeds maximum permitted file size."` |

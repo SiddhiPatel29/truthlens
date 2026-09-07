@@ -27,7 +27,7 @@ truthlens/
 │   │   ├── video_routes.py     # POST /api/detect/video
 │   │   ├── audio_routes.py     # POST /api/detect/audio
 │   │   ├── abuse_routes.py     # POST /api/report/abuse
-│   │   └── auth_routes.py      # POST /api/auth/register, POST /api/auth/login
+│   │   └── auth_routes.py      # POST /api/auth/register, POST /api/auth/login, GET /api/auth/me
 │   ├── services/               # Pure forensic and business logic (no Flask request dependencies)
 │   │   ├── text_service.py     # Text burstiness, perplexity, and repetition heuristics
 │   │   ├── image_service.py    # Laplacian variance, Grad-CAM++ heatmap simulation (OpenCV)
@@ -36,6 +36,7 @@ truthlens/
 │   │   ├── abuse_service.py    # Cryptographic SHA-256 fingerprinting & dossier builder
 │   │   └── auth_service.py     # User registration, login, scrypt hashing, JWT issuance & verification
 │   └── utils/                  # Reusable cross-cutting utilities
+│       ├── auth.py             # @require_auth decorator, Bearer JWT validation, g.current_user_id
 │       ├── errors.py           # Centralized error handlers for 400, 404, 405, 413, 500
 │       ├── file_validator.py   # Uploaded media extension and filename validation
 │       └── response.py         # Standard uniform JSON response envelope
@@ -54,7 +55,9 @@ truthlens/
 │   ├── test_audio_detection.py
 │   ├── test_abuse_report.py
 │   ├── test_database.py        # Database models, constraints, relationships, and migration tests
-│   └── test_auth_registration.py # User registration and password hashing tests
+│   ├── test_auth_registration.py # User registration and password hashing tests
+│   ├── test_auth_login.py      # User login, anti-enumeration, and token generation tests
+│   └── test_auth_authorization.py # Route protection, Bearer validation, and claims tests
 ├── .env.example                # Safe environment configuration template
 ├── requirements.txt            # Pinned production, database, and test dependencies
 └── test.{jpg,mp4,wav}          # Local multimodal test media assets
@@ -179,6 +182,7 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
 
 ## 7. Utility Layer
 Located in `backend/utils/`:
+- **`auth.py` (`@require_auth`)**: Reusable route decorator validating Bearer access tokens from HTTP `Authorization` headers, verifying signature/claims via `AuthService.verify_token`, and binding integer user ID to `g.current_user_id`.
 - **`response.py` (`api_response`)**: Enforces global `{ success, message, data, error_code }` envelope.
 - **`file_validator.py`**: Pure validation functions (`validate_image_file`, `validate_video_file`, `validate_audio_file`, `allowed_file`).
 - **`errors.py` (`register_error_handlers`)**: Application-level error handlers for HTTP 400, 404, 405, 413, and 500.

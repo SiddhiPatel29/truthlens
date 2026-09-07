@@ -101,16 +101,39 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_auth_login.py` | `test_expired_jwt_rejected_by_verification` | Expiration enforcement | **PASSED** | Expired token raised `jwt.ExpiredSignatureError` |
 | `test_auth_login.py` | `test_jwt_payload_does_not_contain_password_or_hash` | Token payload privacy | **PASSED** | Only minimal claims (`sub`, `iat`, `exp`) present in token |
 | `test_auth_login.py` | `test_login_does_not_alter_stored_password_hash` | Idempotent authentication | **PASSED** | Stored `password_hash` unchanged before and after login |
+| `test_auth_authorization.py` | `test_valid_bearer_token_returns_http_200` | Valid authorization HTTP status | **PASSED** | Valid Bearer token returns HTTP 200 |
+| `test_auth_authorization.py` | `test_correct_user_id_extracted_from_sub` | User ID claim extraction | **PASSED** | Response data contains matching user_id integer |
+| `test_auth_authorization.py` | `test_g_current_user_id_available_to_route` | Context variable availability | **PASSED** | `g.current_user_id` successfully accessible inside route |
+| `test_auth_authorization.py` | `test_missing_authorization_header_returns_401` | Missing header rejection | **PASSED** | Returned HTTP 401 with `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_empty_authorization_header_returns_401` | Empty header rejection | **PASSED** | Returned HTTP 401 with `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_whitespace_authorization_header_returns_401` | Whitespace header rejection | **PASSED** | Returned HTTP 401 with `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_wrong_scheme_basic_returns_401` | Scheme enforcement | **PASSED** | Basic scheme rejected with `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_bearer_without_token_returns_401` | Missing token rejection | **PASSED** | `"Bearer"` without token returns `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_bearer_with_trailing_space_only_returns_401` | Blank token rejection | **PASSED** | `"Bearer "` without token returns `AUTHENTICATION_REQUIRED` |
+| `test_auth_authorization.py` | `test_malformed_jwt_returns_401` | Corrupt token rejection | **PASSED** | Malformed JWT string returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_invalid_signature_returns_401` | Signature verification | **PASSED** | Token with wrong secret key returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_expired_token_returns_401` | Expiration check | **PASSED** | Expired token returns HTTP 401 `TOKEN_EXPIRED` |
+| `test_auth_authorization.py` | `test_missing_sub_claim_returns_401` | Required `sub` claim | **PASSED** | Token without `sub` returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_missing_exp_claim_returns_401` | Required `exp` claim | **PASSED** | Token without `exp` returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_missing_iat_claim_returns_401` | Required `iat` claim | **PASSED** | Token without `iat` returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_non_integer_sub_claim_returns_401` | Subject format validation | **PASSED** | Non-integer `sub` string returns `INVALID_TOKEN` |
+| `test_auth_authorization.py` | `test_authorization_errors_use_standard_envelope` | Standard error envelope | **PASSED** | Authorization failures return standard JSON envelope |
+| `test_auth_authorization.py` | `test_error_responses_do_not_expose_secret_key` | Secret key privacy | **PASSED** | Secret key absent from raw response body |
+| `test_auth_authorization.py` | `test_error_responses_do_not_expose_raw_exception_text` | Traceback privacy | **PASSED** | Internal PyJWT exception names absent from response |
+| `test_auth_authorization.py` | `test_auth_me_does_not_expose_password_hash` | Hash leak prevention | **PASSED** | `password_hash` absent from `/api/auth/me` |
+| `test_auth_authorization.py` | `test_auth_me_does_not_expose_password` | Plaintext password privacy | **PASSED** | Plaintext password absent from `/api/auth/me` |
+| `test_auth_authorization.py` | `test_jwt_remains_signed_using_existing_configuration` | Config integration | **PASSED** | Token verifiable using configured `JWT_SECRET_KEY` |
+| `test_auth_authorization.py` | `test_unexpected_server_exception_returns_500_not_masked_as_401` | Error bubbling preservation | **PASSED** | Internal route exception returns HTTP 500 `INTERNAL_SERVER_ERROR` |
 
 ---
 
 ## 2. Live HTTP Server Verification Tests
 
-- **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app`)
-- **Execution Method**: Real HTTP requests sent via Python urllib test script
-- **Result Summary**: 10 passed, 0 failed
+- **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`)
+- **Result Summary**: All live verification checks passed
 
-| Endpoint / Operation | Method | Payload Type | Expected Status | Actual Status | Envelope `success` | Result |
+| Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
 | `/api/health` | GET | None | 200 | 200 | True | **PASSED** |
 | `/api/detect/text` | POST | JSON (> 20 chars) | 200 | 200 | True | **PASSED** |
@@ -122,6 +145,13 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/report/abuse` | POST | JSON (TikTok target) | 400 | 400 | False | **PASSED** |
 | `/api/not-a-real-endpoint` | GET | None | 404 | 404 | False | **PASSED** |
 | `/api/detect/text` | GET | None (Wrong method) | 405 | 405 | False | **PASSED** |
+| `/api/auth/register` | POST | JSON (Valid user payload) | 201 | 201 | True | **PASSED** |
+| `/api/auth/login` | POST | JSON (Valid credentials) | 200 | 200 | True | **PASSED** |
+| `/api/auth/login` | POST | JSON (Invalid credentials) | 401 | 401 | False | **PASSED** |
+| `/api/auth/me` | GET | None (Missing Authorization) | 401 | 401 | False | **PASSED** |
+| `/api/auth/me` | GET | `Authorization: Basic ...` | 401 | 401 | False | **PASSED** |
+| `/api/auth/me` | GET | `Authorization: Bearer <valid>` | 200 | 200 | True | **PASSED** |
+| `/api/auth/me` | GET | `Authorization: Bearer <expired>`| 401 | 401 | False | **PASSED** |
 
 ---
 
@@ -136,3 +166,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Virtualenv isolation | Directory and pip listing | **PASSED** | `.venv` is ignored by git and isolates all 12 required packages |
 | SQLite foreign keys enforced | PRAGMA hook & test execution | **PASSED** | Invalid foreign keys raise `IntegrityError` |
 | Migration idempotency | `flask db upgrade` check | **PASSED** | Applied cleanly to `truthlens.db` |
+| Stateless JWT claims | Code inspection & unit test | **PASSED** | Tokens contain only `sub`, `iat`, `exp` |
+| Password hash leak prevention | Code inspection & test | **PASSED** | Password hashes never exposed via `/api/auth/login` or `/api/auth/me` |
+| Centralized error bubbling | Unit test verification | **PASSED** | Route errors not masked as 401; safely return HTTP 500 |
+

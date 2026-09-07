@@ -312,4 +312,42 @@ Implement stateless JWT-based authentication for user login using `PyJWT==2.10.1
 - **`Flask-JWT-Extended`**: Evaluated, but introduces heavy abstraction, opinionated route decorators, and framework coupling when standard `PyJWT` provides transparent, straightforward encode/decode operations in two lines of code.
 - **Detailed error responses during login**: Rejected due to high risk of user enumeration.
 
+---
+
+## Decision 17: Reusable JWT Authorization Decorator & Protected Route Architecture
+
+### Decision
+Implement a reusable `@require_auth` route decorator in `backend/utils/auth.py` that parses the HTTP `Authorization: Bearer <token>` header, delegates token verification to `AuthService.verify_token()`, extracts the authenticated user ID from the `sub` claim, and stores it in Flask's application context `g.current_user_id`. Introduce a minimal demonstration endpoint `GET /api/auth/me`.
+
+### Reasons & Architectural Principles
+
+1. **Why a Reusable Decorator is Used (`@require_auth`)**:
+   In Flask, decorators are the idiomatic, beginner-friendly, and declarative pattern for cross-cutting route protections. An explicit `@require_auth` decorator makes authorization requirements completely transparent on each route definition without hiding logic inside global `before_request` hooks that could accidentally intercept public or webhook endpoints.
+
+2. **Why Flask `g` is Used (`g.current_user_id`)**:
+   Flask's `g` object is specifically designed as a thread-safe, request-bound context store. Values set on `g` are created afresh for each HTTP request and automatically garbage-collected at request termination. This avoids mutable global state and avoids polluting route signatures with forced parameter injections.
+
+3. **Why Only `user_id` is Stored in `g`**:
+   The authorization decorator operates purely statelessly. Querying the database to load the entire `User` model on every single protected request introduces database latency, connection-pool pressure, and tight coupling between authorization and persistence. Downstream routes that only require user association (e.g. assigning `Scan.user_id = g.current_user_id`) do not need a full User record. Should a route later need user profile fields, it can query `User` on-demand.
+
+4. **Why HTTP 401 is Used Instead of HTTP 403**:
+   RFC 9110 specifies that HTTP 401 Unauthorized represents an authentication/identity challenge (e.g. missing, expired, or invalid credentials where providing valid authentication may succeed). HTTP 403 Forbidden is reserved for authorization where the client identity is known but lacks specific permissions/roles for the requested resource. Since Phase 3 Step 3 implements identity verification without role-based access control, 401 is the correct status code.
+
+5. **Why Detection Routes are Intentionally NOT Protected Yet**:
+   TruthLens is being developed incrementally. The existing detection endpoints (`/api/detect/text`, `/api/detect/image`, `/api/detect/video`, `/api/detect/audio`, `/api/report/abuse`) serve as public forensic tools. In Phase 4, when scan persistence and scan history are implemented, authenticated users will optionally or mandatorily have their scans associated with `current_user_id`. Leaving detection endpoints public for now prevents regressions while authorization is verified on `/api/auth/me`.
+
+6. **Centralized Token Verification & Claims Enforcement in `AuthService.verify_token`**:
+   To prevent logic duplication, `@require_auth` does not call `jwt.decode()` directly. Instead, `AuthService.verify_token()` centralizes decoding, cryptographic signature validation, expiration checking, and enforcement of mandatory standard claims (`sub`, `iat`, `exp`). This ensures consistent security invariants across the entire codebase.
+
+7. **Separation of Authentication Failures (401) from Unexpected Server Errors (500)**:
+   The `@require_auth` decorator catches only authentication-specific errors (`jwt.ExpiredSignatureError`, `jwt.InvalidTokenError`, header formatting errors). It deliberately avoids catch-all `except Exception:` blocks that convert internal exceptions to 401. Unexpected server/runtime exceptions are permitted to bubble up to the centralized error handlers in `backend/utils/errors.py`, ensuring genuine programming bugs are logged server-side and returned as sanitized HTTP 500 `INTERNAL_SERVER_ERROR`.
+
+8. **Why Refresh Tokens and Role-Based Access Control Remain Deferred**:
+   Refresh tokens require database-backed token family tracking and revocation tables. Role-based access control requires role and permission models. Deferring both to dedicated future phases prevents scope creep and keeps the current step focused and verifiable.
+
+### Alternatives Considered
+- **Global `before_request` hook**: Rejected because it applies globally and requires URL whitelist regexes, which easily leads to security bypasses or accidental blocking of public endpoints.
+- **Loading full `User` model from DB inside `@require_auth`**: Rejected due to unnecessary DB overhead on every request and loss of stateless JWT scalability.
+- **Catching all exceptions inside `@require_auth` and returning 401**: Rejected because it masks internal server errors and misleads API consumers and developers.
+
 

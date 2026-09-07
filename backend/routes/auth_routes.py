@@ -3,8 +3,9 @@ Authentication API Routes for VeraMedia AI.
 Provides endpoints for user registration and identity management.
 """
 import logging
-from flask import Blueprint, request
+from flask import Blueprint, request, g
 from backend.services.auth_service import AuthService, AuthValidationError, AuthCredentialsError
+from backend.utils.auth import require_auth
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -138,4 +139,34 @@ def login():
             error_code="INTERNAL_SERVER_ERROR",
             status_code=500
         )
+
+@auth_bp.route("/auth/me", methods=["GET"])
+@require_auth
+def get_current_user():
+    """
+    GET /api/auth/me
+    Demonstrates and verifies JWT authorization on a protected route.
+    Requires a valid Bearer token in the Authorization header.
+
+    Response (200 OK):
+    {
+        "success": true,
+        "message": "Authenticated user.",
+        "data": {
+            "user_id": 1
+        },
+        "error_code": null
+    }
+
+    Error Responses:
+    - 401 Unauthorized: Missing, expired, or invalid Bearer token.
+    """
+    return api_response(
+        success=True,
+        message="Authenticated user.",
+        data={
+            "user_id": g.current_user_id
+        },
+        status_code=200
+    )
 

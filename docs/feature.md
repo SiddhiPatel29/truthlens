@@ -170,5 +170,30 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 89 passed out of 89 tests in 5.09s.
 - **Current Status**: Complete.
 
+---
+
+## 12. JWT Route Authorization & Identity Verification (Phase 3 Step 3)
+- **Status**: Completed (Phase 3 Step 3).
+- **Reason**: Provide a reusable, robust `@require_auth` decorator enabling protected API routes to securely identify the authenticated user from standard HTTP Bearer tokens.
+- **Files Changed / Created**:
+  - `backend/utils/auth.py` (New - reusable `@require_auth` decorator)
+  - `backend/services/auth_service.py` (Enforced standard claims `['sub', 'iat', 'exp']` in `verify_token`)
+  - `backend/routes/auth_routes.py` (Added protected demonstration endpoint `GET /api/auth/me`)
+  - `tests/test_auth_authorization.py` (New - 23 comprehensive authorization tests)
+- **Implementation**:
+  - Extracts and validates HTTP `Authorization: Bearer <token>` header.
+  - Returns HTTP 401 with `AUTHENTICATION_REQUIRED` for missing, empty, or non-Bearer headers.
+  - Cryptographically verifies token signature, expiration, and mandatory claims (`sub`, `iat`, `exp`) using centralized `AuthService.verify_token()`.
+  - Returns HTTP 401 with `TOKEN_EXPIRED` for expired tokens.
+  - Returns HTTP 401 with `INVALID_TOKEN` for malformed, tampered, or claim-violating tokens.
+  - Validates positive integer `sub` and binds it to request context: `g.current_user_id`.
+  - Operates statelessly without querying database on every request.
+  - Does NOT mask unexpected server exceptions as 401; permits internal errors to reach centralized HTTP 500 error handler.
+  - Exposes `GET /api/auth/me` returning `{ "user_id": g.current_user_id }` inside the standard response envelope.
+- **Tests**:
+  - `tests/test_auth_authorization.py` (23 tests passed in 2.07s).
+  - Complete test suite: 112 passed out of 112 tests in 10.02s.
+- **Current Status**: Complete.
+
 
 
