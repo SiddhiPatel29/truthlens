@@ -10,16 +10,20 @@ from backend.database.models import User, Scan, ScanResult
 def clean_db(app):
     """Ensures a clean database state for each text detection test."""
     with app.app_context():
+        db.session.rollback()
         db.session.query(ScanResult).delete()
         db.session.query(Scan).delete()
         db.session.query(User).delete()
         db.session.commit()
+    db.session.remove()
     yield
     with app.app_context():
+        db.session.rollback()
         db.session.query(ScanResult).delete()
         db.session.query(Scan).delete()
         db.session.query(User).delete()
         db.session.commit()
+    db.session.remove()
 
 @pytest.fixture
 def auth_user(app):

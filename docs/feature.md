@@ -237,6 +237,30 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 136 passed out of 136 tests in 9.70s.
 - **Current Status**: Complete.
 
+---
+
+## 15. Image Detection Scan Persistence (Phase 4 Step 3)
+- **Status**: Completed (Phase 4 Step 3).
+- **Reason**: Connect the existing image detection endpoint to authentication and scan persistence so that analyzed image scans are recorded, associated with the authenticated user, and transitioned to `COMPLETED` status with uploaded filename metadata.
+- **Files Changed / Created**:
+  - `backend/routes/image_routes.py` (Modified - protected with `@require_auth`, calls `ScanService.create_scan` with `filename=file.filename` and `ScanService.save_scan_result`, handles `ScanServiceError` cleanly)
+  - `tests/test_image_detection.py` (Modified - updated regression tests with authentication fixtures and headers)
+  - `tests/test_image_persistence.py` (New - 11 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Guards `POST /api/detect/image`, ensuring unauthenticated requests are rejected with standardized 401 responses before reading image bytes or running analysis.
+  - Forensic Mapping: Maps detector outputs (`is_deepfake`, `confidence_score`, `manipulation_type`, `image_dimensions`, `heatmap_preview`) into `prediction` (`DEEPFAKE` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and `result_data` JSON.
+  - Media Metadata: Records original uploaded filename in `Scan.filename`.
+  - Exclusion of Raw Binary Bytes: Heavy uploaded file bytes are not stored in the database.
+  - Scan Lifecycle: Scan is created in `PENDING` status (`user_id=g.current_user_id`, `media_type="image"`, `filename=file.filename`), then updated atomically to `COMPLETED` with timestamp upon `save_scan_result()`.
+  - Failure Handling: Catches `ScanServiceError` and logs server-side without leaking raw SQL or database errors, returning sanitized HTTP 500.
+  - Preservation: Response envelope and detector data output remain completely backward-compatible. Video, audio, and abuse routes remain public and unchanged.
+- **Tests**:
+  - `tests/test_image_persistence.py` (11 tests passed in 2.30s).
+  - `tests/test_image_detection.py` (5 tests passed in 1.34s).
+  - Complete test suite: 147 passed out of 147 tests in 13.34s.
+- **Current Status**: Complete.
+
+
 
 
 

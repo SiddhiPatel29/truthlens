@@ -114,12 +114,23 @@ Client receives HTTP 200 JSON Response
 
 ```
 Client HTTP Request: POST /api/detect/image
-Headers: Content-Type: multipart/form-data
+Headers:
+  Content-Type: multipart/form-data
+  Authorization: Bearer <access_token>
 Body: file field 'image' containing image binary (e.g. test.jpg)
   │
   ▼
 [backend/app.py: create_app]
   Flask WSGI router matches prefix '/api' and routes to image_bp
+  │
+  ▼
+[backend/utils/auth.py: @require_auth]
+  1. Inspects request.headers.get("Authorization")
+     - Missing or non-Bearer: returns 401 AUTHENTICATION_REQUIRED
+  2. Extracts token and calls AuthService.verify_token(token)
+     - Expired: returns 401 TOKEN_EXPIRED
+     - Invalid signature/claims: returns 401 INVALID_TOKEN
+  3. Validates positive integer sub claim and binds g.current_user_id = user_id
   │
   ▼
 [backend/routes/image_routes.py: detect_image()]
@@ -150,7 +161,24 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
 [backend/routes/image_routes.py: detect_image()]
   Catches ValueError -> logs warning, returns api_response(False, str(e), None, "PROCESSING_ERROR", 400)
   Catches Exception  -> logs traceback via logger.exception(), returns sanitized 500 error
-  On success:
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.create_scan()]
+  1. Validates user_id=g.current_user_id, media_type="image", filename=file.filename
+  2. Inserts Scan record with status="PENDING" and created_at=utc_now()
+  3. Commits transaction and returns scan instance
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.save_scan_result()]
+  1. Maps detector output:
+     - prediction = "DEEPFAKE" if is_deepfake else "AUTHENTIC"
+     - confidence = confidence_score
+     - risk_level = "HIGH" if confidence >= 0.7 else ("MEDIUM" if confidence >= 0.4 else "LOW")
+     - result_data = result dictionary (metadata + preview data URL; no raw image bytes)
+  2. Inserts ScanResult record linked to scan.id
+  3. Atomically updates parent scan status="COMPLETED", completed_at=utc_now()
+  4. Commits atomic transaction
+  (If persistence fails: route catches ScanServiceError, logs exception, returns 500 INTERNAL_SERVER_ERROR)
   │
   ▼
 [backend/utils/response.py: api_response()]

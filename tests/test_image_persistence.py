@@ -1,13 +1,17 @@
 """
-Tests for Text Detection Scan Persistence (Phase 4 Step 2).
-Verifies that POST /api/detect/text:
+Tests for Image Detection Scan Persistence (Phase 4 Step 3).
+Verifies that POST /api/detect/image:
 - Enforces @require_auth JWT authentication.
 - Persists Scans and ScanResults via ScanService.
-- Atomically transitions Scan from PENDING to COMPLETED.
+- Correctly captures original uploaded media filename metadata.
+- Atomically transitions Scan from PENDING to COMPLETED status with timestamp.
 - Accurately maps detection metrics to prediction, confidence, risk_level, and result_data.
+- Stores detector metadata in result_data without storing raw image bytes.
 - Enforces strict user isolation across multiple authenticated accounts.
 - Sanitizes server errors without leaking raw database or exception details.
 """
+import io
+import os
 import time
 import pytest
 import jwt
@@ -42,15 +46,15 @@ def auth_user_a(app):
     password = "UserAPassword123!"
     with app.app_context():
         user = User(
-            name="Alice Investigator",
-            email="alice.persistence@example.com",
+            name="Alice Image Investigator",
+            email="alice.image@example.com",
             password_hash=generate_password_hash(password),
             is_active=True
         )
         db.session.add(user)
         db.session.commit()
         user_id = user.id
-    return {"id": user_id, "name": "Alice Investigator", "email": "alice.persistence@example.com", "password": password}
+    return {"id": user_id, "name": "Alice Image Investigator", "email": "alice.image@example.com", "password": password}
 
 @pytest.fixture
 def auth_headers_a(client, auth_user_a):
@@ -68,15 +72,15 @@ def auth_user_b(app):
     password = "UserBPassword123!"
     with app.app_context():
         user = User(
-            name="Bob Investigator",
-            email="bob.persistence@example.com",
+            name="Bob Image Investigator",
+            email="bob.image@example.com",
             password_hash=generate_password_hash(password),
             is_active=True
         )
         db.session.add(user)
         db.session.commit()
         user_id = user.id
-    return {"id": user_id, "name": "Bob Investigator", "email": "bob.persistence@example.com", "password": password}
+    return {"id": user_id, "name": "Bob Image Investigator", "email": "bob.image@example.com", "password": password}
 
 @pytest.fixture
 def auth_headers_b(client, auth_user_b):
@@ -90,42 +94,51 @@ def auth_headers_b(client, auth_user_b):
 
 
 # ===========================================================================
-# 1. Valid Authenticated Text Scan Persistence
+# 1. Valid Authenticated Image Scan Persistence
 # ===========================================================================
 
-def test_valid_authenticated_text_request_persists_scan_and_result(client, app, auth_user_a, auth_headers_a, sample_text):
+def test_valid_authenticated_image_request_persists_scan_and_result(
+    client, app, real_image_path, auth_user_a, auth_headers_a
+):
     """
-    1. Valid authenticated text request:
+    1. Valid authenticated image request:
        - Returns HTTP 200 with standard response envelope.
        - Exactly one Scan record is created.
        - scan.user_id matches authenticated user.
-       - scan.media_type == 'text' and filename is None.
+       - scan.media_type == 'image'.
+       - scan.filename is persisted correctly as 'test.jpg'.
        - scan.status == 'COMPLETED' and completed_at is populated.
        - Exactly one ScanResult record is created.
-       - persisted prediction matches detector output.
+       - persisted prediction matches detector output ('DEEPFAKE' or 'AUTHENTIC').
        - persisted confidence matches detector output.
-       - persisted risk_level matches calculated risk.
-       - result_data contains the full detector outcome.
+       - persisted risk_level matches calculated risk ('HIGH', 'MEDIUM', or 'LOW').
+       - result_data contains the full detector outcome without raw binary bytes.
     """
-    response = client.post(
-        "/api/detect/text",
-        json={"text": sample_text},
-        headers=auth_headers_a
-    )
+    assert os.path.exists(real_image_path), f"Test image missing at {real_image_path}"
+
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "test.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
 
     assert response.status_code == 200
     assert response.is_json
 
     json_data = response.get_json()
     assert json_data["success"] is True
-    assert json_data["message"] == "Text analyzed successfully."
+    assert json_data["message"] == "Image analyzed successfully."
     assert json_data["error_code"] is None
 
-    data = json_data["data"]
-    assert "is_ai_generated" in data
-    assert "ai_confidence_score" in data
-    assert "metrics" in data
-    assert "sentence_breakdown" in data
+    payload = json_data["data"]
+    assert "is_deepfake" in payload
+    assert "confidence_score" in payload
+    assert "manipulation_type" in payload
+    assert "image_dimensions" in payload
+    assert "heatmap_preview" in payload
 
     # Verify database persistence
     with app.app_context():
@@ -134,8 +147,8 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
         scan = scans[0]
 
         assert scan.user_id == auth_user_a["id"]
-        assert scan.media_type == "text"
-        assert scan.filename is None
+        assert scan.media_type == "image"
+        assert scan.filename == "test.jpg"
         assert scan.status == "COMPLETED"
         assert scan.created_at is not None
         assert scan.completed_at is not None
@@ -147,18 +160,18 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
         scan_result = results[0]
 
         assert scan_result.scan_id == scan.id
-        expected_prediction = "AI_GENERATED" if data["is_ai_generated"] else "AUTHENTIC"
+        expected_prediction = "DEEPFAKE" if payload["is_deepfake"] else "AUTHENTIC"
         assert scan_result.prediction == expected_prediction
+        assert scan_result.confidence == pytest.approx(payload["confidence_score"], abs=1e-5)
 
-        assert scan_result.confidence == pytest.approx(data["ai_confidence_score"], abs=1e-5)
-
-        # Verify risk level mapping
-        conf = data["ai_confidence_score"]
+        conf = payload["confidence_score"]
         expected_risk = "HIGH" if conf >= 0.7 else ("MEDIUM" if conf >= 0.4 else "LOW")
         assert scan_result.risk_level == expected_risk
 
-        # Verify result_data content
-        assert scan_result.result_data == data
+        # Verify result_data content matches detector output
+        assert scan_result.result_data == payload
+        # Ensure no raw binary image bytes are stored in result_data
+        assert "image_bytes" not in scan_result.result_data
         assert scan_result.created_at is not None
 
 
@@ -166,13 +179,19 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
 # 2. Missing Authorization Header
 # ===========================================================================
 
-def test_missing_auth_header_returns_401_no_scan_created(client, app, sample_text):
+def test_missing_auth_header_returns_401_no_scan_created(client, app, real_image_path):
     """
     2. Missing Authorization header:
        - Returns HTTP 401 with AUTHENTICATION_REQUIRED.
        - No Scan or ScanResult record is created in the database.
     """
-    response = client.post("/api/detect/text", json={"text": sample_text})
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "test.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data"
+        )
 
     assert response.status_code == 401
     assert response.is_json
@@ -190,17 +209,20 @@ def test_missing_auth_header_returns_401_no_scan_created(client, app, sample_tex
 # 3. Invalid JWT Token
 # ===========================================================================
 
-def test_invalid_jwt_returns_401_no_scan_created(client, app, sample_text):
+def test_invalid_jwt_returns_401_no_scan_created(client, app, real_image_path):
     """
     3. Invalid JWT token:
        - Returns HTTP 401 with INVALID_TOKEN.
        - No Scan or ScanResult record is created in the database.
     """
-    response = client.post(
-        "/api/detect/text",
-        json={"text": sample_text},
-        headers={"Authorization": "Bearer invalid.token.signature"}
-    )
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "test.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers={"Authorization": "Bearer invalid.jwt.token"}
+        )
 
     assert response.status_code == 401
     assert response.is_json
@@ -218,7 +240,7 @@ def test_invalid_jwt_returns_401_no_scan_created(client, app, sample_text):
 # 4. Expired JWT Token
 # ===========================================================================
 
-def test_expired_jwt_returns_401_no_scan_created(client, app, auth_user_a, sample_text):
+def test_expired_jwt_returns_401_no_scan_created(client, app, auth_user_a, real_image_path):
     """
     4. Expired JWT token:
        - Returns HTTP 401 with TOKEN_EXPIRED.
@@ -236,11 +258,14 @@ def test_expired_jwt_returns_401_no_scan_created(client, app, auth_user_a, sampl
         algorithm="HS256"
     )
 
-    response = client.post(
-        "/api/detect/text",
-        json={"text": sample_text},
-        headers={"Authorization": f"Bearer {expired_token}"}
-    )
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "test.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers={"Authorization": f"Bearer {expired_token}"}
+        )
 
     assert response.status_code == 401
     assert response.is_json
@@ -255,18 +280,20 @@ def test_expired_jwt_returns_401_no_scan_created(client, app, auth_user_a, sampl
 
 
 # ===========================================================================
-# 5. Invalid Text Request Validation
+# 5. Missing Image / File Field
 # ===========================================================================
 
-def test_invalid_text_request_too_short_preserves_400_no_scan_created(client, app, auth_headers_a):
+def test_missing_image_file_field_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
-    5. Invalid text request (< 20 characters):
-       - Returns HTTP 400 with TEXT_TOO_SHORT.
+    5. Missing 'image' multipart field:
+       - Returns HTTP 400 with MISSING_FILE.
        - No Scan or ScanResult record is created in the database.
     """
+    data = {"wrong_field": (io.BytesIO(b"fake image data"), "test.jpg")}
     response = client.post(
-        "/api/detect/text",
-        json={"text": "Short"},
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
         headers=auth_headers_a
     )
 
@@ -275,22 +302,28 @@ def test_invalid_text_request_too_short_preserves_400_no_scan_created(client, ap
 
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "TEXT_TOO_SHORT"
+    assert json_data["error_code"] == "MISSING_FILE"
 
     with app.app_context():
         assert Scan.query.count() == 0
         assert ScanResult.query.count() == 0
 
 
-def test_invalid_text_request_missing_field_preserves_400_no_scan_created(client, app, auth_headers_a):
+# ===========================================================================
+# 6. Unsupported Image Extension
+# ===========================================================================
+
+def test_unsupported_image_extension_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
-    5b. Invalid text request (missing 'text' key):
-       - Returns HTTP 400 with INVALID_INPUT.
+    6. Unsupported file extension:
+       - Returns HTTP 400 with INVALID_FILE.
        - No Scan or ScanResult record is created in the database.
     """
+    data = {"image": (io.BytesIO(b"arbitrary text content"), "payload.txt")}
     response = client.post(
-        "/api/detect/text",
-        json={"invalid_key": "This text is long enough but keyed wrong."},
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
         headers=auth_headers_a
     )
 
@@ -299,7 +332,7 @@ def test_invalid_text_request_missing_field_preserves_400_no_scan_created(client
 
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "INVALID_INPUT"
+    assert json_data["error_code"] == "INVALID_FILE"
 
     with app.app_context():
         assert Scan.query.count() == 0
@@ -307,22 +340,83 @@ def test_invalid_text_request_missing_field_preserves_400_no_scan_created(client
 
 
 # ===========================================================================
-# 6. Database / Persistence Failure
+# 7. Empty Filename & Corrupt Content Validation
 # ===========================================================================
 
-def test_create_scan_database_failure_returns_sanitized_500(client, app, auth_headers_a, sample_text):
+def test_empty_filename_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
-    6a. Database failure during create_scan():
+    7a. Empty filename provided:
+       - Returns HTTP 400 with INVALID_FILE.
+       - No Scan or ScanResult record is created in the database.
+    """
+    data = {"image": (io.BytesIO(b""), "")}
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_corrupt_image_content_preserves_400_no_scan_created(client, app, auth_headers_a):
+    """
+    7b. Corrupted/unreadable image byte stream:
+       - Returns HTTP 400 with PROCESSING_ERROR.
+       - No Scan or ScanResult record is created in the database.
+    """
+    data = {"image": (io.BytesIO(b"corrupted binary stream"), "broken.jpg")}
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+# ===========================================================================
+# 8. Database Failure During create_scan
+# ===========================================================================
+
+def test_create_scan_database_failure_returns_sanitized_500(
+    client, app, real_image_path, auth_headers_a
+):
+    """
+    8. Database failure during create_scan():
        - Returns HTTP 500 without leaking raw SQL or exception details.
        - Response success is False with error_code 'INTERNAL_SERVER_ERROR'.
        - No misleading successful response.
     """
-    with patch.object(ScanService, "create_scan", side_effect=ScanDatabaseError("Raw SQLite locked error detail")):
-        response = client.post(
-            "/api/detect/text",
-            json={"text": sample_text},
-            headers=auth_headers_a
-        )
+    with patch.object(ScanService, "create_scan", side_effect=ScanDatabaseError("Raw SQLite disk I/O lock error")):
+        with open(real_image_path, "rb") as img_file:
+            data = {"image": (img_file, "test.jpg")}
+            response = client.post(
+                "/api/detect/image",
+                data=data,
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
 
     assert response.status_code == 500
     assert response.is_json
@@ -330,26 +424,35 @@ def test_create_scan_database_failure_returns_sanitized_500(client, app, auth_he
     json_data = response.get_json()
     assert json_data["success"] is False
     assert json_data["error_code"] == "INTERNAL_SERVER_ERROR"
-    assert "Raw SQLite locked" not in response.get_data(as_text=True)
+    assert "Raw SQLite disk" not in response.get_data(as_text=True)
 
     with app.app_context():
         assert Scan.query.count() == 0
         assert ScanResult.query.count() == 0
 
 
-def test_save_scan_result_database_failure_returns_sanitized_500(client, app, auth_headers_a, sample_text):
+# ===========================================================================
+# 9. Database Failure During save_scan_result
+# ===========================================================================
+
+def test_save_scan_result_database_failure_returns_sanitized_500(
+    client, app, real_image_path, auth_headers_a
+):
     """
-    6b. Database failure during save_scan_result():
+    9. Database failure during save_scan_result():
        - Returns HTTP 500 without leaking raw database details.
        - Response success is False with error_code 'INTERNAL_SERVER_ERROR'.
        - No misleading successful response.
     """
-    with patch.object(ScanService, "save_scan_result", side_effect=ScanDatabaseError("Disk I/O error occurred")):
-        response = client.post(
-            "/api/detect/text",
-            json={"text": sample_text},
-            headers=auth_headers_a
-        )
+    with patch.object(ScanService, "save_scan_result", side_effect=ScanDatabaseError("Simulated DB transaction crash")):
+        with open(real_image_path, "rb") as img_file:
+            data = {"image": (img_file, "test.jpg")}
+            response = client.post(
+                "/api/detect/image",
+                data=data,
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
 
     assert response.status_code == 500
     assert response.is_json
@@ -357,34 +460,43 @@ def test_save_scan_result_database_failure_returns_sanitized_500(client, app, au
     json_data = response.get_json()
     assert json_data["success"] is False
     assert json_data["error_code"] == "INTERNAL_SERVER_ERROR"
-    assert "Disk I/O error" not in response.get_data(as_text=True)
+    assert "Simulated DB transaction crash" not in response.get_data(as_text=True)
 
     with app.app_context():
         assert ScanResult.query.count() == 0
 
 
 # ===========================================================================
-# 7. Multiple Authenticated Users (Isolation)
+# 10. Multiple Authenticated Users (Isolation)
 # ===========================================================================
 
-def test_multiple_authenticated_users_scan_ownership_isolation(
-    client, app, auth_user_a, auth_headers_a, auth_user_b, auth_headers_b
+def test_multiple_authenticated_users_image_scan_isolation(
+    client, app, real_image_path, auth_user_a, auth_headers_a, auth_user_b, auth_headers_b
 ):
     """
-    7. Multiple authenticated users:
-       - User A submits a text scan; persisted scan belongs strictly to User A.
-       - User B submits a text scan; persisted scan belongs strictly to User B.
+    10. Multiple authenticated users:
+       - User A submits an image scan; persisted scan belongs strictly to User A.
+       - User B submits an image scan; persisted scan belongs strictly to User B.
        - No cross-user ownership confusion.
     """
-    text_a = "User A analysis input: The quick brown fox jumps over the lazy dog repeatedly and deliberately."
-    text_b = "User B analysis input: Inquiries into artificial intelligence demonstrate varying syntactic metrics."
-
-    # User A scan
-    resp_a = client.post("/api/detect/text", json={"text": text_a}, headers=auth_headers_a)
+    # User A image scan
+    with open(real_image_path, "rb") as img_a:
+        resp_a = client.post(
+            "/api/detect/image",
+            data={"image": (img_a, "user_a_evidence.jpg")},
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
     assert resp_a.status_code == 200
 
-    # User B scan
-    resp_b = client.post("/api/detect/text", json={"text": text_b}, headers=auth_headers_b)
+    # User B image scan
+    with open(real_image_path, "rb") as img_b:
+        resp_b = client.post(
+            "/api/detect/image",
+            data={"image": (img_b, "user_b_evidence.jpg")},
+            content_type="multipart/form-data",
+            headers=auth_headers_b
+        )
     assert resp_b.status_code == 200
 
     with app.app_context():
@@ -394,48 +506,17 @@ def test_multiple_authenticated_users_scan_ownership_isolation(
         scans_a = Scan.query.filter_by(user_id=auth_user_a["id"]).all()
         assert len(scans_a) == 1
         assert scans_a[0].user_id == auth_user_a["id"]
+        assert scans_a[0].filename == "user_a_evidence.jpg"
         assert scans_a[0].status == "COMPLETED"
         assert scans_a[0].result is not None
 
         scans_b = Scan.query.filter_by(user_id=auth_user_b["id"]).all()
         assert len(scans_b) == 1
         assert scans_b[0].user_id == auth_user_b["id"]
+        assert scans_b[0].filename == "user_b_evidence.jpg"
         assert scans_b[0].status == "COMPLETED"
         assert scans_b[0].result is not None
 
-        # Confirm distinct scan IDs and cross-isolation
+        # Verify distinct scan IDs and cross-isolation
         assert scans_a[0].id != scans_b[0].id
         assert scans_a[0].result.id != scans_b[0].result.id
-
-
-# ===========================================================================
-# 8. Detection Prediction Consistency
-# ===========================================================================
-
-def test_authentic_text_persists_authentic_prediction(client, app, auth_headers_a):
-    """
-    Verifies that human-like text with natural variance is evaluated and
-    persisted with prediction 'AUTHENTIC'.
-    """
-    # Natural, varied sentence lengths produce high burstiness -> human probability
-    natural_text = (
-        "Wait. That is not what was originally agreed upon by the senior committee members during the symposium. "
-        "Why? Because the results were completely unexpected and shocking to everyone present in the room! "
-        "Indeed, we must re-evaluate every single foundational premise before proceeding any further with this project."
-    )
-    response = client.post(
-        "/api/detect/text",
-        json={"text": natural_text},
-        headers=auth_headers_a
-    )
-    assert response.status_code == 200
-    json_data = response.get_json()
-
-    with app.app_context():
-        scan = Scan.query.first()
-        assert scan is not None
-        assert scan.result is not None
-        if not json_data["data"]["is_ai_generated"]:
-            assert scan.result.prediction == "AUTHENTIC"
-        else:
-            assert scan.result.prediction == "AI_GENERATED"

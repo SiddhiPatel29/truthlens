@@ -60,7 +60,8 @@ truthlens/
 │   ├── test_auth_login.py      # User login, anti-enumeration, and token generation tests
 │   ├── test_auth_authorization.py # Route protection, Bearer validation, and claims tests
 │   ├── test_scan_service.py    # Scan and ScanResult transactional persistence and retrieval tests
-│   └── test_text_persistence.py # Text detection scan persistence and user isolation tests
+│   ├── test_text_persistence.py # Text detection scan persistence and user isolation tests
+│   └── test_image_persistence.py # Image detection scan persistence and user isolation tests
 ├── .env.example                # Safe environment configuration template
 ├── requirements.txt            # Pinned production, database, and test dependencies
 └── test.{jpg,mp4,wav}          # Local multimodal test media assets
@@ -160,9 +161,9 @@ All API endpoints are defined inside isolated Flask Blueprints within `backend/r
 - Every route handler is responsible solely for:
   - Parsing incoming HTTP requests (extracting JSON body or `multipart/form-data` files).
   - Executing input validation (validating required fields, data types, file extensions).
-  - Enforcing authorization where required (e.g. `@require_auth` on `GET /api/auth/me` and `POST /api/detect/text`).
+  - Enforcing authorization where required (e.g. `@require_auth` on `GET /api/auth/me`, `POST /api/detect/text`, and `POST /api/detect/image`).
   - Calling the corresponding domain service in `backend/services/`.
-  - Triggering transactional persistence via `ScanService` for authenticated scan modalities (`POST /api/detect/text`). Note: image, video, audio detection, and abuse dispatch remain public and unpersisted in this step.
+  - Triggering transactional persistence via `ScanService` for authenticated scan modalities (`POST /api/detect/text`, `POST /api/detect/image`). Note: video and audio detection, and abuse dispatch remain public and unpersisted in this step.
   - Wrapping responses and errors inside the standard uniform response envelope via `api_response()`.
   - Logging unexpected exceptions using Python's standard `logging` logger without exposing internal details to clients.
 

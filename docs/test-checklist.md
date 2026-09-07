@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-07
-- **Result Summary**: **136 passed, 0 failed, 0 skipped in 9.70s**
+- **Result Summary**: **147 passed, 0 failed, 0 skipped in 13.34s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -148,6 +148,17 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_text_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_text_persistence.py` | `test_multiple_authenticated_users_scan_ownership_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans isolated strictly by user_id |
 | `test_text_persistence.py` | `test_authentic_text_persists_authentic_prediction` | Authentic text prediction | **PASSED** | Varied text persisted with prediction `AUTHENTIC` |
+| `test_image_persistence.py` | `test_valid_authenticated_image_request_persists_scan_and_result` | Valid image persistence | **PASSED** | Returned 200, Scan COMPLETED, filename 'test.jpg', ScanResult fields match |
+| `test_image_persistence.py` | `test_missing_auth_header_returns_401_no_scan_created` | Unauthenticated image request | **PASSED** | Returned 401 `AUTHENTICATION_REQUIRED`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_invalid_jwt_returns_401_no_scan_created` | Invalid Bearer token | **PASSED** | Returned 401 `INVALID_TOKEN`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_expired_jwt_returns_401_no_scan_created` | Expired Bearer token | **PASSED** | Returned 401 `TOKEN_EXPIRED`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_missing_image_file_field_preserves_400_no_scan_created` | Missing image field | **PASSED** | Returned 400 `MISSING_FILE`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_unsupported_image_extension_preserves_400_no_scan_created` | Unsupported image extension | **PASSED** | Returned 400 `INVALID_FILE`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_empty_filename_preserves_400_no_scan_created` | Empty filename | **PASSED** | Returned 400 `INVALID_FILE`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_corrupt_image_content_preserves_400_no_scan_created` | Corrupt image content | **PASSED** | Returned 400 `PROCESSING_ERROR`, 0 scans created in DB |
+| `test_image_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
+| `test_image_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
+| `test_image_persistence.py` | `test_multiple_authenticated_users_image_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
 
 ---
 
@@ -163,7 +174,9 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/text` | POST | JSON (> 20 chars, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/text` | POST | JSON (Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/text` | POST | JSON (< 20 chars, Bearer token) | 400 | 400 | False | **PASSED** |
-| `/api/detect/image` | POST | Multipart (`test.jpg`) | 200 | 200 | True | **PASSED** |
+| `/api/detect/image` | POST | Multipart (`test.jpg`, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/image` | POST | Multipart (`test.jpg`, Missing Authorization) | 401 | 401 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/video` | POST | Multipart (`test.mp4`) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`) | 200 | 200 | True | **PASSED** |
 | `/api/report/abuse` | POST | JSON (YouTube target) | 201 | 201 | True | **PASSED** |

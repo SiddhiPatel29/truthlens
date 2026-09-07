@@ -416,6 +416,36 @@ Connect `POST /api/detect/text` to `@require_auth` and `ScanService`, persisting
 5. **No Schema Changes or Migrations Required**:
    `Scan` and `ScanResult` tables created in Phase 2 already support `media_type="text"`, nullable `filename`, foreign key `user_id`, and native JSON `result_data`. No schema modifications or database migrations were necessary.
 
+---
+
+## Decision 20: Image Detection Scan Persistence & Route Authorization (Phase 4 Step 3)
+
+### Decision
+Connect `POST /api/detect/image` to `@require_auth` and `ScanService`, persisting the image scan and its forensic results with user ownership and uploaded filename metadata, while preserving the API response envelope, multipart file validation rules, and detector output structures. Video and audio detection and abuse reporting remain public and unpersisted in this step.
+
+### Reasons & Architectural Principles
+
+1. **Why `POST /api/detect/image` Now Requires Authentication (`@require_auth`)**:
+   Persisted image scans must be associated with an authenticated user account (`Scan.user_id = g.current_user_id`). Requiring Bearer JWT authentication upfront prevents unauthorized users from filling the database with unowned scans and ensures security invariants are maintained. Missing, expired, or invalid tokens fail fast before reading file bytes or invoking image decoding.
+
+2. **Capturing Media Filename Metadata**:
+   Unlike text detection (which has no uploaded file), image detection receives an uploaded file via `request.files['image']`. The original uploaded filename (`file.filename`) is passed directly to `ScanService.create_scan(filename=...)`, allowing users to trace scan results back to their source assets.
+
+3. **Detector Output Mapping & Raw Binary Exclusion**:
+   `ImageDetectionService.analyze_image` computes spatial anomalies and renders a visual Grad-CAM++ heatmap overlay returned as a Base64 JPEG data URL. The route maps:
+   - `prediction`: `"DEEPFAKE"` if `is_deepfake` is True, else `"AUTHENTIC"`
+   - `confidence`: `float(result.get("confidence_score", 0.0))`
+   - `risk_level`: `"HIGH"` if confidence >= 0.7, `"MEDIUM"` if confidence >= 0.4, else `"LOW"` (consistent with the application's risk classification pattern)
+   - `result_data`: Stores the structured detector dictionary (`is_deepfake`, `confidence_score`, `manipulation_type`, `image_dimensions`, `heatmap_preview`).
+   - **Critical Storage Rule**: Raw uploaded binary image bytes are never stored in the database. The database records forensic analysis metadata, while heavy binary handling and secure storage are deferred to Phase 5.
+
+4. **Service Boundary & Orphan-Scan Consideration**:
+   `ScanService.create_scan` and `ScanService.save_scan_result` are discrete transactional operations. The route controller treats `ScanService` as the persistence boundary and does not manipulate `db.session` directly. If `save_scan_result` fails after `create_scan` succeeds, the parent scan remains in `PENDING` status. This temporary behavior is intentional: it represents an in-progress or interrupted scan without introducing an overly complex compensation mechanism before asynchronous job processing is formally introduced.
+
+5. **Isolation of Other Modalities**:
+   Video, audio, and abuse dispatch routes remain public and untouched, adhering strictly to the feature-by-feature progression model.
+
+
 
 
 

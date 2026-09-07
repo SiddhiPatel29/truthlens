@@ -170,17 +170,21 @@ None.
 
 - **Method**: `POST`
 - **Path**: `/api/detect/image`
-- **Authentication**: None (Public in Phase 1)
-- **Service Called**: `ImageDetectionService.analyze_image`
-- **Request Headers**: `Content-Type: multipart/form-data`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Services Called**: `ImageDetectionService.analyze_image`, `ScanService.create_scan`, `ScanService.save_scan_result`
+- **Persistence**: Persists a `Scan` (modality `image`, `filename` set to uploaded filename, owned by authenticated user) in `PENDING` status, followed by an atomic commit of a `ScanResult` (`COMPLETED` status, timestamp, calculated `prediction` `DEEPFAKE` or `AUTHENTIC`, `confidence`, and `risk_level`). Raw image bytes are NOT stored in the database.
+- **Request Headers**:
+  - `Content-Type: multipart/form-data`
+  - `Authorization: Bearer <token>`
 - **Request Body**:
   - `image` (binary file): Supported formats: `.png`, `.jpg`, `.jpeg`, `.webp`.
 
 ### Validation Rules
-1. Request must be `multipart/form-data` with form field name `image`.
-2. File must be present and filename non-empty.
-3. Extension must be in `{"png", "jpg", "jpeg", "webp"}`.
-4. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
+1. Request must contain a valid Bearer JWT in the `Authorization` header.
+2. Request must be `multipart/form-data` with form field name `image`.
+3. File must be present and filename non-empty.
+4. Extension must be in `{"png", "jpg", "jpeg", "webp"}`.
+5. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
 
 ### Success Response (`200 OK`)
 ```json
@@ -202,6 +206,33 @@ None.
 ```
 
 ### Error Responses
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
 - **Missing `image` field (`400 Bad Request`)**:
   ```json
   {
@@ -227,6 +258,15 @@ None.
     "message": "Failed to decode image. File might be corrupted or in an unsupported format.",
     "data": null,
     "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Persistence Failure (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while persisting the scan results.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
   }
   ```
 
