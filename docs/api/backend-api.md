@@ -522,7 +522,75 @@ None.
 
 ---
 
-## 8. Global Framework Errors
+## 8. User Login & JWT Authentication
+
+- **Method**: `POST`
+- **Path**: `/api/auth/login`
+- **Authentication**: None (Public)
+- **Service Called**: `AuthService.login_user`
+- **Request Headers**: `Content-Type: application/json`
+- **Request Body**:
+```json
+{
+  "email": "alice@example.com",
+  "password": "StrongPassword123"
+}
+```
+
+### Validation & Authentication Rules
+1. Request body must be a valid JSON object.
+2. `email`: Required, non-empty string. Automatically normalized via `.strip().lower()`.
+3. `password`: Required, non-empty string.
+4. Credential verification: Cryptographically checked against the stored hash using Werkzeug `check_password_hash()`. Requires user account `is_active == True`.
+5. Anti-enumeration security: If the user does not exist, the password is wrong, or the account is inactive, the endpoint returns an identical HTTP 401 generic error (`INVALID_CREDENTIALS`), preventing email harvesting.
+6. JWT token generation: Returns a signed HS256 JWT access token with minimal claims (`sub`, `iat`, `exp`). The token contains no sensitive credentials or hashes.
+
+### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Login successful.",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "Bearer",
+    "expires_in": 86400
+  },
+  "error_code": null
+}
+```
+
+### Error Responses
+- **Missing or non-string required field (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Field 'email' is required.",
+    "data": null,
+    "error_code": "MISSING_FIELD"
+  }
+  ```
+- **Malformed / Non-JSON payload (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Request body must be valid JSON.",
+    "data": null,
+    "error_code": "INVALID_JSON"
+  }
+  ```
+- **Invalid credentials / Account inactive (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid email or password.",
+    "data": null,
+    "error_code": "INVALID_CREDENTIALS"
+  }
+  ```
+
+---
+
+## 9. Global Framework Errors
 
 | HTTP Status | Error Code | Example Trigger | Message |
 | :--- | :--- | :--- | :--- |
@@ -531,4 +599,5 @@ None.
 | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | `GET /api/detect/text` | `"The HTTP method is not allowed for this endpoint."` |
 | `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | File upload > 50 MB | `"Request payload exceeds maximum permitted file size."` |
 | `500 Internal Server Error` | `INTERNAL_SERVER_ERROR` | Unhandled server exception | `"An unexpected internal server error occurred."` |
+
 

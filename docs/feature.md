@@ -141,9 +141,34 @@ This document records the features implemented during each development phase of 
   - Hashes passwords using Werkzeug's secure `generate_password_hash` (`scrypt`). Plaintext is never stored or logged. Unstripped raw passwords are preserved for hashing.
   - Persists new `User` record to database.
   - Returns `201 Created` with standard envelope containing safe user dictionary (`id`, `name`, `email`), omitting `password_hash`.
-- **Tests**:
-  - `tests/test_auth_registration.py` (25 tests passed).
-  - Complete test suite: 66 passed out of 66 tests.
 - **Current Status**: Complete.
+
+---
+
+### Feature 11: User Login & JWT Authentication (Step 2)
+- **Feature**: User authentication endpoint (`POST /api/auth/login`) issuing signed JSON Web Tokens (JWT).
+- **Reason**: Enable registered users to authenticate securely with email normalization and password hash verification, receiving a stateless, time-bounded JWT access token for API identity.
+- **Files Changed / Created**:
+  - `requirements.txt` (Pinned `PyJWT==2.10.1`)
+  - `backend/config.py` (Added `JWT_SECRET_KEY` with production safety check and `JWT_EXPIRATION_HOURS`)
+  - `.env.example` (Added safe configuration placeholders for `JWT_SECRET_KEY` and `JWT_EXPIRATION_HOURS`)
+  - `backend/services/auth_service.py` (Added `AuthCredentialsError`, `AuthService.login_user`, and `AuthService.verify_token`)
+  - `backend/routes/auth_routes.py` (Added `POST /api/auth/login` endpoint)
+  - `tests/conftest.py` (Added `JWT_SECRET_KEY` and `JWT_EXPIRATION_HOURS` to `TestConfig`)
+  - `tests/test_auth_login.py` (New - 23 comprehensive login and JWT verification tests)
+- **Implementation**:
+  - Validates JSON payload structure, required string `email`, and required string `password`.
+  - Normalizes email via `.strip().lower()`.
+  - Queries `User` by normalized email.
+  - Verifies submitted password against stored hash using `werkzeug.security.check_password_hash`.
+  - Verifies account `is_active` status.
+  - **Anti-Enumeration Security**: Nonexistent user, incorrect password, or inactive account all return an identical HTTP 401 response with `error_code: "INVALID_CREDENTIALS"` and message `"Invalid email or password."`.
+  - Generates an HS256-signed JWT token containing minimal claims (`sub`, `iat`, `exp`). Excludes passwords, hashes, and personal data.
+  - Returns `200 OK` with standard envelope containing `{ access_token, token_type: "Bearer", expires_in }`.
+- **Tests**:
+  - `tests/test_auth_login.py` (23 tests passed in 3.56s).
+  - Complete test suite: 89 passed out of 89 tests in 5.09s.
+- **Current Status**: Complete.
+
 
 

@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-06
-- **Result Summary**: **66 passed, 0 failed, 0 skipped in 2.43s**
+- **Result Summary**: **89 passed, 0 failed, 0 skipped in 5.09s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -78,6 +78,29 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_auth_registration.py` | `test_register_weak_password_rejected` | Local weak-password blocklist | **PASSED** | Common weak sequence rejected with `WEAK_PASSWORD` |
 | `test_auth_registration.py` | `test_register_weak_password_case_insensitive` | Case-insensitive blocklist | **PASSED** | Uppercase weak password rejected with `WEAK_PASSWORD` |
 | `test_auth_registration.py` | `test_register_weak_password_surrounding_whitespace_blocked` | Whitespace bypass prevention | **PASSED** | Padded weak password rejected with `WEAK_PASSWORD` |
+| `test_auth_login.py` | `test_login_success_http_200` | Successful login HTTP status | **PASSED** | Valid credentials return HTTP 200 |
+| `test_auth_login.py` | `test_login_success_returns_access_token` | JWT access token issuance | **PASSED** | Returned standard envelope containing `access_token` |
+| `test_auth_login.py` | `test_login_token_type_is_bearer` | Token type format | **PASSED** | `token_type` is `"Bearer"` |
+| `test_auth_login.py` | `test_login_expires_in_present_and_sensible` | Token lifespan field | **PASSED** | `expires_in` is 86400 seconds (24h) |
+| `test_auth_login.py` | `test_login_response_does_not_expose_password_hash` | Hash leak prevention | **PASSED** | Response string does not contain `password_hash` or salt |
+| `test_auth_login.py` | `test_login_response_does_not_expose_password` | Plaintext password leak prevention | **PASSED** | Response string does not contain plaintext password |
+| `test_auth_login.py` | `test_correct_password_succeeds` | Password correctness | **PASSED** | Matching password returns `success: true` |
+| `test_auth_login.py` | `test_incorrect_password_returns_http_401` | Incorrect password rejection | **PASSED** | Returned HTTP 401 with `INVALID_CREDENTIALS` |
+| `test_auth_login.py` | `test_nonexistent_email_returns_http_401` | Unknown user rejection | **PASSED** | Returned HTTP 401 with `INVALID_CREDENTIALS` |
+| `test_auth_login.py` | `test_incorrect_password_and_nonexistent_email_identical_response` | Anti-enumeration check | **PASSED** | Wrong password and unknown user have identical response |
+| `test_auth_login.py` | `test_inactive_user_cannot_login` | Inactive account check | **PASSED** | Inactive user rejected with identical generic 401 error |
+| `test_auth_login.py` | `test_missing_email_returns_http_400` | Required email check | **PASSED** | Missing email returned HTTP 400 with `MISSING_FIELD` |
+| `test_auth_login.py` | `test_missing_password_returns_http_400` | Required password check | **PASSED** | Missing password returned HTTP 400 with `MISSING_FIELD` |
+| `test_auth_login.py` | `test_non_string_email_rejected` | Email type validation | **PASSED** | Non-string email returned HTTP 400 with `MISSING_FIELD` |
+| `test_auth_login.py` | `test_non_string_password_rejected` | Password type validation | **PASSED** | Non-string password returned HTTP 400 with `MISSING_FIELD` |
+| `test_auth_login.py` | `test_malformed_non_json_request_rejected` | Non-JSON payload rejection | **PASSED** | Raw text returned HTTP 400 with `INVALID_JSON` |
+| `test_auth_login.py` | `test_email_normalization_works_consistently` | Login email normalization | **PASSED** | Whitespace-padded uppercase email successfully authenticated |
+| `test_auth_login.py` | `test_jwt_decoded_and_verified_with_secret` | JWT signature verification | **PASSED** | Token verified with configured test secret |
+| `test_auth_login.py` | `test_jwt_contains_expected_user_id` | Minimal claims identity | **PASSED** | `sub` claim matches user ID string |
+| `test_auth_login.py` | `test_jwt_contains_expiration_and_issued_at` | Token timestamp claims | **PASSED** | Contains `exp` and `iat` with 24-hour delta |
+| `test_auth_login.py` | `test_expired_jwt_rejected_by_verification` | Expiration enforcement | **PASSED** | Expired token raised `jwt.ExpiredSignatureError` |
+| `test_auth_login.py` | `test_jwt_payload_does_not_contain_password_or_hash` | Token payload privacy | **PASSED** | Only minimal claims (`sub`, `iat`, `exp`) present in token |
+| `test_auth_login.py` | `test_login_does_not_alter_stored_password_hash` | Idempotent authentication | **PASSED** | Stored `password_hash` unchanged before and after login |
 
 ---
 

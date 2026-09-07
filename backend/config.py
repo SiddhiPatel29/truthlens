@@ -41,6 +41,19 @@ class Config:
             "A secure, non-default SECRET_KEY must be provided when running in production."
         )
 
+    # JWT Configuration
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-key-change-in-production")
+    if FLASK_ENV == "production" and (not JWT_SECRET_KEY or JWT_SECRET_KEY in ("dev-jwt-secret-key-change-in-production", "default-dev-key", "dev_jwt_secret_key_change_in_production")):
+        raise ValueError(
+            "CRITICAL SECURITY CONFIGURATION ERROR: "
+            "A secure, non-default JWT_SECRET_KEY must be provided when running in production."
+        )
+
+    try:
+        JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
+    except ValueError:
+        JWT_EXPIRATION_HOURS = 24
+
     # Allowed origin for CORS (Frontend communication)
     CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "http://localhost:3000")
 

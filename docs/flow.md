@@ -353,7 +353,78 @@ Client receives HTTP 201 Created JSON Response
 
 ---
 
-## 8. Database Initialization & Session Lifecycle Flow
+## 8. User Login Flow (`POST /api/auth/login`)
+
+```
+Client HTTP Request: POST /api/auth/login
+Header: Content-Type: application/json
+Body: { "email": "  Alice.Smith@Example.COM  ", "password": "StrongPassword123" }
+  │
+  ▼
+[backend/app.py: Flask WSGI dispatch]
+  Routes to auth_bp
+  │
+  ▼
+[backend/routes/auth_routes.py: login()]
+  1. Validation: Checks request.get_json(silent=True)
+     - If body is None or not dict:
+       Returns api_response(False, "Request body must be valid JSON.", None, "INVALID_JSON", 400)
+  │
+  ▼
+[backend/services/auth_service.py: AuthService.login_user(body)]
+  1. Input Validation:
+     - Verifies 'email' is present and is a non-empty string (raises AuthValidationError("MISSING_FIELD") if missing)
+     - Verifies 'password' is present and is a string (raises AuthValidationError("MISSING_FIELD") if missing)
+  2. Email Normalization:
+     - Normalizes: raw_email.strip().lower() -> "alice.smith@example.com"
+  3. User Lookup:
+     - Queries User.query.filter_by(email=normalized_email).first()
+  4. Active-User & Password Verification (Anti-Enumeration):
+     - If user is None:
+       Raises AuthCredentialsError("Invalid email or password.", "INVALID_CREDENTIALS")
+     - If not check_password_hash(user.password_hash, password):
+       Raises AuthCredentialsError("Invalid email or password.", "INVALID_CREDENTIALS")
+     - If not user.is_active:
+       Raises AuthCredentialsError("Invalid email or password.", "INVALID_CREDENTIALS")
+     (All three failures produce identical generic 401 response)
+  5. JWT Generation:
+     - Calculates iat (now) and exp (now + timedelta(hours=JWT_EXPIRATION_HOURS))
+     - Constructs minimal claims payload: { "sub": str(user.id), "iat": iat, "exp": exp }
+     - Signs token with PyJWT: jwt.encode(payload, JWT_SECRET_KEY, algorithm="HS256")
+  6. Returns login payload:
+     {
+       "access_token": access_token,
+       "token_type": "Bearer",
+       "expires_in": expires_in_seconds
+     }
+  │
+  ▼
+[backend/routes/auth_routes.py: login()]
+  Catches AuthValidationError  -> returns api_response(False, e.message, None, e.error_code, 400)
+  Catches AuthCredentialsError -> returns api_response(False, e.message, None, e.error_code, 401)
+  Catches Exception            -> logs traceback via logger.exception(), returns sanitized 500 error
+  On success:
+  │
+  ▼
+[backend/utils/response.py: api_response()]
+  Returns jsonify({
+    "success": True,
+    "message": "Login successful.",
+    "data": {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token_type": "Bearer",
+      "expires_in": 86400
+    },
+    "error_code": None
+  }), 200
+  │
+  ▼
+Client receives HTTP 200 OK with Bearer access token
+```
+
+---
+
+## 9. Database Initialization & Session Lifecycle Flow
 
 ```
 Application Startup / Test Context:
@@ -386,7 +457,7 @@ Session Lifecycle:
 
 ---
 
-## 9. Migration Execution Flow (Flask-Migrate + Alembic)
+## 10. Migration Execution Flow (Flask-Migrate + Alembic)
 
 ```
 CLI Command: flask db upgrade
@@ -413,7 +484,7 @@ Database is upgraded and schema matches SQLAlchemy declarative models
 
 ---
 
-## 10. Centralized Error Execution Flow (400, 404, 405, 413, 500)
+## 11. Centralized Error Execution Flow (400, 404, 405, 413, 500)
 
 ```
 Client sends invalid or unhandled request:

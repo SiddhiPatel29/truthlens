@@ -27,14 +27,14 @@ truthlens/
 │   │   ├── video_routes.py     # POST /api/detect/video
 │   │   ├── audio_routes.py     # POST /api/detect/audio
 │   │   ├── abuse_routes.py     # POST /api/report/abuse
-│   │   └── auth_routes.py      # POST /api/auth/register
+│   │   └── auth_routes.py      # POST /api/auth/register, POST /api/auth/login
 │   ├── services/               # Pure forensic and business logic (no Flask request dependencies)
 │   │   ├── text_service.py     # Text burstiness, perplexity, and repetition heuristics
 │   │   ├── image_service.py    # Laplacian variance, Grad-CAM++ heatmap simulation (OpenCV)
 │   │   ├── video_service.py    # Keyframe extraction, anomaly scoring, temporal variance (OpenCV)
 │   │   ├── audio_service.py    # Zero-crossing rate, spectral energy, lip-sync desync (SciPy)
 │   │   ├── abuse_service.py    # Cryptographic SHA-256 fingerprinting & dossier builder
-│   │   └── auth_service.py     # User registration, email normalization, scrypt password hashing
+│   │   └── auth_service.py     # User registration, login, scrypt hashing, JWT issuance & verification
 │   └── utils/                  # Reusable cross-cutting utilities
 │       ├── errors.py           # Centralized error handlers for 400, 404, 405, 413, 500
 │       ├── file_validator.py   # Uploaded media extension and filename validation
@@ -173,7 +173,7 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
 - **`AbuseDispatcherService`**:
   Validates target takedown platform (YouTube, X, Meta, Custom), generates a unique report UUID, computes a deterministic SHA-256 cryptographic digest of the manifest, maps the target platform to its compliance channel, and formats a takedown dossier.
 - **`AuthService`**:
-  Validates registration parameters, normalizes email addresses (`strip().lower()`), verifies modern password policy (12–128 characters, no mandatory composition rules, whitespace/Unicode allowed, local weak-password blocklist), performs duplicate email checks, hashes passwords securely using Werkzeug's `generate_password_hash` (`scrypt`), and persists `User` records in the database. Plaintext passwords are never stored or logged.
+  Validates registration parameters, normalizes email addresses (`strip().lower()`), verifies modern password policy (12–128 characters, no mandatory composition rules, whitespace/Unicode allowed, local weak-password blocklist), performs duplicate email checks, hashes passwords securely using Werkzeug's `generate_password_hash` (`scrypt`), and persists `User` records in the database. For login, verifies credentials via `check_password_hash`, enforces account active status, prevents user enumeration with generic 401 errors, and issues signed HS256 JWT access tokens with minimal claims (`sub`, `iat`, `exp`).
 
 ---
 
@@ -190,7 +190,8 @@ Located in `backend/utils/`:
 - Configuration parameters are read from environment variables via `os.getenv` with safe development defaults.
 - `DATABASE_URL` defaults to `sqlite:///truthlens.db`.
 - Automatically normalizes legacy `postgres://` URLs to `postgresql://` for SQLAlchemy 2.0.
-- Production safety guard prevents running with default secret key.
+- Production safety guards prevent running with default `SECRET_KEY` or `JWT_SECRET_KEY`.
+- `JWT_EXPIRATION_HOURS` configures token expiration duration (defaults to 24 hours).
 
 ---
 
@@ -205,6 +206,8 @@ Located in `backend/utils/`:
 - **pytest (8.3.4)**: Automated testing framework.
 - **SQLAlchemy (2.0.52)**: Object relational mapper and database toolkit.
 - **Flask-SQLAlchemy (3.1.1)**: Flask extension for SQLAlchemy.
-- **Alembic (1.19.2)**: Database migration engine.
+- **alembic (1.19.2)**: Database migration engine.
 - **Flask-Migrate (4.1.0)**: Flask extension for Alembic database migrations.
 - **Werkzeug (3.1.8)**: WSGI web server utility and cryptographic password hashing (`scrypt`).
+- **PyJWT (2.10.1)**: JSON Web Token generation, signature encoding, and claim verification.
+

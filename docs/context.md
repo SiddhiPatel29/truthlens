@@ -42,12 +42,25 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Implemented modern password policy: 12-128 characters, no mandatory composition rules, spaces and Unicode allowed/preserved, local weak-password blocklist (`WEAK_PASSWORD`). (Local blocklist only; no external breached-password check).
    - Implemented validation for required name, valid email, email normalization (`strip().lower()`), and duplicate email rejection.
    - Preserved response envelope returning `{ id, name, email }` without exposing `password_hash`.
-   - Added 25 unit and integration tests in `tests/test_auth_registration.py`. Total test suite expanded to **66 passed tests in 2.43s**.
+   - Added 25 unit and integration tests in `tests/test_auth_registration.py`.
+2. **User Login & JWT Authentication Implemented (Step 2)**:
+   - Added and pinned `PyJWT==2.10.1` in `requirements.txt`.
+   - Configured `JWT_SECRET_KEY` (with production safety checks) and `JWT_EXPIRATION_HOURS` (defaults to 24h) in `backend/config.py` and `.env.example`.
+   - Added `AuthCredentialsError` and `login_user` to `backend/services/auth_service.py`:
+     - Validates payload structure and required non-empty string fields.
+     - Normalizes email via `.strip().lower()`.
+     - Verifies password against stored hash using `check_password_hash`.
+     - Verifies account `is_active == True`.
+     - Implements strict anti-enumeration security: nonexistent email, wrong password, and inactive user return identical HTTP 401 generic error (`INVALID_CREDENTIALS`).
+     - Issues signed HS256 JWT access token with minimal claims (`sub`, `iat`, `exp`).
+   - Added `verify_token` helper to decode and validate tokens against expiration and signature.
+   - Implemented `POST /api/auth/login` in `backend/routes/auth_routes.py`.
+   - Created `tests/test_auth_login.py` with 23 comprehensive tests. Total test suite expanded to **89 passed tests in 5.09s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 3 Step 1 (User Registration & Password Hashing) is complete and verified. Ready for Step 2 (User Login & JWT Issuance).
+- Phase 3 Step 2 (User Login & JWT Authentication) is complete and verified. Ready for Phase 3 Step 3 (Authorization Decorator / Middleware `@auth_required` and protected endpoints).
 
 ---
 
@@ -56,6 +69,8 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **SQLAlchemy 2.0 & Flask-Migrate**: Portable ORM with versioned Alembic batch migrations.
 - **SQLite Foreign Key Enforcement**: Enforced via SQLAlchemy engine connect event hook executing `PRAGMA foreign_keys=ON`.
 - **Werkzeug `scrypt` Password Hashing**: Built-in, zero-dependency, highly secure memory-hard password hashing.
+- **Stateless JWT Tokens (`PyJWT`)**: HS256 signed access tokens with minimal claims (`sub`, `iat`, `exp`) and 24-hour expiration.
+- **Anti-Enumeration Login Security**: Generic HTTP 401 (`INVALID_CREDENTIALS`) for all authentication failures prevents account/email discovery.
 - **Nullable `Scan.user_id`**: Allows the scan model to support both anonymous scans (public demo) and authenticated user scans in Phase 3.
 - **Pure Forensic & Auth Services**: Services in `backend/services/` encapsulate validation and business logic cleanly.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.

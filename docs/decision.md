@@ -271,3 +271,45 @@ In alignment with modern identity security guidelines (such as NIST SP 800-63B),
 - **Full external HaveIBeenPwned API check in Phase 3 Step 1**: Rejected to keep registration offline, resilient, fast, and free of external runtime dependencies.
 - **Stripping whitespace before hashing**: Rejected. Trimming leading/trailing whitespace from the actual password alters user intent; spaces inside and around passphrases are preserved in the hash. Whitespace is only stripped during blocklist comparison.
 
+---
+
+## Decision 16: User Login Architecture & JWT Authentication Design
+
+### Decision
+Implement stateless JWT-based authentication for user login using `PyJWT==2.10.1`, returning a signed HS256 access token upon valid credentials (`POST /api/auth/login`).
+
+### Reasons & Security Architectural Principles
+
+1. **Why JWT (JSON Web Tokens) are Used**:
+   TruthLens is architected as a decoupled backend providing a RESTful API consumed by a separate frontend. Stateless JWTs eliminate server-side session state and shared Redis/memory session stores, allowing horizontal scaling and seamless verification across distributed backend processes.
+
+2. **Why Authentication Failures are Generic (Anti-Enumeration)**:
+   Any invalid login attempt (whether the email does not exist in the database, the password fails cryptographic hash check, or the account is inactive) returns an identical HTTP 401 response:
+   ```json
+   {
+     "success": false,
+     "message": "Invalid email or password.",
+     "data": null,
+     "error_code": "INVALID_CREDENTIALS"
+   }
+   ```
+   Differentiating errors (e.g. "Email not found" vs. "Incorrect password") would enable account enumeration and targeted credential-stuffing attacks.
+
+3. **Why Token Claims are Minimal**:
+   The token payload contains exclusively `sub` (user ID string), `iat` (issued-at timestamp), and `exp` (expiration timestamp). Sensitive data (passwords, hashes, email, permissions) are intentionally excluded because JWT payloads are base64url-encoded and decodable by anyone holding the token.
+
+4. **Why Expiration is Mandatory**:
+   Stateless tokens cannot be revoked on the server without introducing distributed token blacklists. Enforcing a bounded lifespan (`JWT_EXPIRATION_HOURS`, default 24h) minimizes the risk window if a token is inadvertently compromised on a client device.
+
+5. **Why Secret Keys are Sourced from Environment Variables**:
+   Cryptographic signature integrity depends entirely on secret confidentiality. Hardcoded secrets in code or git repositories risk catastrophic token forgery. Sourcing `JWT_SECRET_KEY` from environment variables, backed by production startup checks that fail fast if a default secret is used, guarantees separation of code and secrets.
+
+6. **Why Refresh Tokens are Intentionally Postponed**:
+   Phase 3 Step 2 establishes the core authentication foundation with minimal abstraction. Introducing refresh tokens at this stage would require database persistence for refresh token families, token rotation schemes, and revocation mechanisms. Postponing refresh tokens to a later phase maintains an understandable, incremental, and highly verifiable codebase.
+
+### Alternatives Considered
+- **Server-Side Cookie Sessions (`Flask-Session` / Redis)**: Rejected due to unnecessary stateful infrastructure dependencies for a decoupled REST API.
+- **`Flask-JWT-Extended`**: Evaluated, but introduces heavy abstraction, opinionated route decorators, and framework coupling when standard `PyJWT` provides transparent, straightforward encode/decode operations in two lines of code.
+- **Detailed error responses during login**: Rejected due to high risk of user enumeration.
+
+

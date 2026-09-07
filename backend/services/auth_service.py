@@ -4,7 +4,10 @@ Handles user registration, input validation, email normalization, and secure pas
 """
 import re
 import logging
-from werkzeug.security import generate_password_hash
+from datetime import datetime, timezone, timedelta
+import jwt
+from flask import current_app
+from werkzeug.security import generate_password_hash, check_password_hash
 from backend.database.db import db
 from backend.database.models import User
 
@@ -42,6 +45,13 @@ COMMON_WEAK_PASSWORDS = {
 class AuthValidationError(ValueError):
     """Exception raised for authentication validation failures with specific error codes."""
     def __init__(self, message: str, error_code: str):
+        super().__init__(message)
+        self.message = message
+        self.error_code = error_code
+
+class AuthCredentialsError(ValueError):
+    """Exception raised for invalid authentication credentials (anti-enumeration)."""
+    def __init__(self, message: str = "Invalid email or password.", error_code: str = "INVALID_CREDENTIALS"):
         super().__init__(message)
         self.message = message
         self.error_code = error_code
@@ -128,3 +138,78 @@ class AuthService:
             "name": user.name,
             "email": user.email
         }
+
+    @classmethod
+    def login_user(cls, data: dict) -> dict:
+        """
+        Validates login payload, verifies user credentials, and returns a signed JWT.
+
+        Returns:
+            dict: {"access_token": token, "token_type": "Bearer", "expires_in": seconds}
+
+        Raises:
+            AuthValidationError: If payload or fields are missing/malformed (HTTP 400).
+            AuthCredentialsError: If authentication fails (HTTP 401, anti-enumeration).
+        """
+        if not data or not isinstance(data, dict):
+            raise AuthValidationError("Request body must be a valid JSON object.", "INVALID_JSON")
+
+        # 1. Validate email presence and type
+        email = data.get("email")
+        if email is None or not isinstance(email, str) or not email.strip():
+            raise AuthValidationError("Field 'email' is required.", "MISSING_FIELD")
+
+        # 2. Validate password presence and type
+        password = data.get("password")
+        if password is None or not isinstance(password, str):
+            raise AuthValidationError("Field 'password' is required.", "MISSING_FIELD")
+
+        # 3. Normalize email exactly as registration
+        normalized_email = email.strip().lower()
+
+        # 4. Lookup user
+        user = User.query.filter_by(email=normalized_email).first()
+
+        # 5. Generic credential verification (anti-enumeration)
+        # Check user existence, password correctness, and account active status
+        if user is None or not check_password_hash(user.password_hash, password) or not user.is_active:
+            raise AuthCredentialsError("Invalid email or password.", "INVALID_CREDENTIALS")
+
+        # 6. Generate signed JWT token
+        now = datetime.now(timezone.utc)
+        expiration_hours = current_app.config.get("JWT_EXPIRATION_HOURS", 24)
+        expires_delta = timedelta(hours=expiration_hours)
+        expires_at = now + expires_delta
+        expires_in = int(expires_delta.total_seconds())
+
+        payload = {
+            "sub": str(user.id),
+            "iat": int(now.timestamp()),
+            "exp": int(expires_at.timestamp()),
+        }
+
+        secret_key = current_app.config.get("JWT_SECRET_KEY")
+        access_token = jwt.encode(payload, secret_key, algorithm="HS256")
+
+        logger.info("User id=%d authenticated successfully", user.id)
+
+        return {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+        }
+
+    @classmethod
+    def verify_token(cls, token: str) -> dict:
+        """
+        Decodes and validates a signed JWT token using the configured secret key.
+
+        Returns:
+            dict: The decoded token claims (e.g. sub, iat, exp).
+
+        Raises:
+            jwt.ExpiredSignatureError: If the token has expired.
+            jwt.InvalidTokenError: If the token signature or format is invalid.
+        """
+        secret_key = current_app.config.get("JWT_SECRET_KEY")
+        return jwt.decode(token, secret_key, algorithms=["HS256"])
