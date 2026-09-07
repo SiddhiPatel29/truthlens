@@ -442,8 +442,36 @@ Connect `POST /api/detect/image` to `@require_auth` and `ScanService`, persistin
 4. **Service Boundary & Orphan-Scan Consideration**:
    `ScanService.create_scan` and `ScanService.save_scan_result` are discrete transactional operations. The route controller treats `ScanService` as the persistence boundary and does not manipulate `db.session` directly. If `save_scan_result` fails after `create_scan` succeeds, the parent scan remains in `PENDING` status. This temporary behavior is intentional: it represents an in-progress or interrupted scan without introducing an overly complex compensation mechanism before asynchronous job processing is formally introduced.
 
-5. **Isolation of Other Modalities**:
-   Video, audio, and abuse dispatch routes remain public and untouched, adhering strictly to the feature-by-feature progression model.
+## Decision 21: Video Detection Scan Persistence & Route Authorization (Phase 4 Step 4)
+
+### Decision
+Connect `POST /api/detect/video` to `@require_auth` and `ScanService`, persisting the video scan and its forensic results with user ownership and uploaded filename metadata, while preserving the API response envelope, multipart file validation rules, and detector output structures. Audio detection and abuse reporting remain public and unpersisted in this step.
+
+### Reasons & Architectural Principles
+
+1. **Why `POST /api/detect/video` Now Requires Authentication (`@require_auth`)**:
+   Video processing is computationally expensive (OpenCV frame extraction, Laplacian variance calculations, and Grad-CAM++ rendering). Requiring a valid Bearer JWT access token upfront ensures that unauthorized, expired, or invalid requests fail immediately with HTTP 401 (`AUTHENTICATION_REQUIRED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`) before allocating system resources, writing temporary disk files, or running frame analyses.
+
+2. **Capturing Media Filename Metadata**:
+   Like image detection, video detection receives an uploaded media file via `request.files['video']`. The original uploaded filename (`file.filename`) is passed directly to `ScanService.create_scan(filename=...)`, allowing users to identify and trace video scan records back to their source files.
+
+3. **Detector Output Mapping & Raw Binary Exclusion**:
+   `VideoDetectionService.analyze_video` samples keyframes, computes temporal and anomaly metrics, and generates a Grad-CAM++ overlay on the peak anomaly keyframe returned as a Base64 JPEG data URL.
+   The route deliberately constructs `result_data`:
+   - `prediction`: `"DEEPFAKE"` if `is_deepfake` is True, else `"AUTHENTIC"`
+   - `confidence`: `float(result.get("confidence_score", 0.0))`
+   - `risk_level`: Evaluated against the detector's confidence semantics:
+     - `confidence_score` represents sequence anomaly probability in `[0.10, 0.98]` where `is_deepfake = overall_confidence > 0.65`.
+     - The established application risk mapping (`HIGH >= 0.7`, `MEDIUM >= 0.4`, `LOW < 0.4`) is completely compatible with these confidence semantics.
+   - `result_data`: Deliberately constructed dictionary containing `{ is_deepfake, confidence_score, metrics: { duration_seconds, total_frames_analyzed, temporal_instability, peak_frame_anomaly }, keyframe_heatmap_preview }`.
+   - **Critical Storage Rule**: Raw uploaded video binary streams, unencoded frames, and large transient numpy arrays are NEVER stored in the database. Only serializable summary metrics and keyframe heatmap evidence are persisted.
+
+4. **Service Boundary & Orphan-Scan Consideration**:
+   `ScanService.create_scan` and `ScanService.save_scan_result` are discrete transactional operations. The route treats `ScanService` as the persistence boundary without touching `db.session`. If `save_scan_result` fails after `create_scan` succeeds, the parent scan remains in `PENDING` status. This temporary behavior represents an incomplete scan without introducing complex distributed rollback mechanisms before asynchronous job processing is formally introduced.
+
+5. **Isolation of Audio and Abuse Modalities**:
+   Audio detection and abuse dispatch routes remain public and untouched, preserving feature-by-feature progression.
+
 
 
 

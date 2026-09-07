@@ -97,11 +97,23 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Video, audio, and abuse detection endpoints remain public and unmodified.
    - Created `tests/test_image_persistence.py` with 11 comprehensive tests.
    - Total test suite expanded to **147 passed tests in 13.34s**.
+4. **Video Detection Scan Persistence (Step 4)**:
+   - Connected `POST /api/detect/video` to `@require_auth` and `ScanService`.
+   - Enforced Bearer JWT authentication upfront before reading video streams or running OpenCV frame processing.
+   - Bound authenticated user ID from `g.current_user_id`.
+   - Persisted scan in `PENDING` status with `media_type="video"`, `filename=file.filename`, and `user_id=g.current_user_id`.
+   - Mapped detector output into `prediction` (`DEEPFAKE` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW` based on anomaly confidence semantics), and deliberately constructed `result_data` JSON (duration, frame count, temporal instability, peak anomaly, and keyframe heatmap preview; raw video bytes excluded).
+   - Saved result atomically and transitioned scan to `COMPLETED` status with UTC timestamp via `ScanService.save_scan_result()`.
+   - Handled persistence failures cleanly with sanitized HTTP 500 responses without leaking raw SQL.
+   - Preserved all response envelope fields and validation behaviors.
+   - Audio and abuse detection endpoints remain public and unmodified.
+   - Created `tests/test_video_persistence.py` with 11 comprehensive tests.
+   - Total test suite expanded to **159 passed tests in 24.70s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 4 Step 3 (Image Detection Scan Persistence) is complete and verified with 147/147 tests passing. Ready for user commit.
+- Phase 4 Step 4 (Video Detection Scan Persistence) is complete and verified with 159/159 tests passing. Ready for user commit.
 
 ---
 
@@ -117,13 +129,13 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Atomic Single-Transaction Commit**: `save_scan_result` persists the `ScanResult` and updates the parent `Scan` in one atomic commit, rolling back on failure.
 - **Controlled One-to-One Conflict Rejection**: Proactively raises `ScanConflictError` when attempting to attach a duplicate result to a scan.
 - **Specific Database Error Handling**: Specifically catches `SQLAlchemyError` for session rollback and `ScanDatabaseError`, allowing unexpected programming errors to bubble up naturally.
-- **Authenticated Text & Image Persistence**: Both `POST /api/detect/text` and `POST /api/detect/image` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media; raw binary image bytes are excluded from database storage.
+- **Authenticated Text, Image & Video Persistence**: `POST /api/detect/text`, `POST /api/detect/image`, and `POST /api/detect/video` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media; raw binary image/video bytes are excluded from database storage.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
 
 ## 5. Known Limitations & Remaining Problems
-1. **Unpersisted Video/Audio Endpoints**: Video and audio detection endpoints compute and return results directly to the client but do not yet invoke `ScanService` (deferred to subsequent Phase 4 steps).
+1. **Unpersisted Audio Endpoint**: Audio detection endpoint computes and returns results directly to the client but does not yet invoke `ScanService` (deferred to Phase 4 Step 5).
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
 3. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening (Phase 5).
 4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
@@ -131,11 +143,12 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 
 ---
 
-## 6. Recommended Next Backend Task (Phase 4 — Step 4)
-Implement **Phase 4 Step 4: Video Detection Scan Persistence**:
-1. Wire `@require_auth` into `POST /api/detect/video`.
-2. Persist video scan with `media_type="video"`, `filename=file.filename`, and `user_id=g.current_user_id`.
-3. Map video analysis output (`is_deepfake`, `confidence_score`, anomaly keyframe preview) to `ScanResult`.
-4. Add focused video persistence tests and ensure zero regressions across other modalities.
+## 6. Recommended Next Backend Task (Phase 4 — Step 5)
+Implement **Phase 4 Step 5: Audio Detection Scan Persistence**:
+1. Wire `@require_auth` into `POST /api/detect/audio`.
+2. Persist audio scan with `media_type="audio"`, `filename=file.filename`, and `user_id=g.current_user_id`.
+3. Map audio analysis output (`is_synthetic_audio`, `confidence_score`, lip-sync discrepancies) to `ScanResult`.
+4. Add focused audio persistence tests and ensure zero regressions across other modalities.
+
 
 

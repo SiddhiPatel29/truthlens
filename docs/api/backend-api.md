@@ -276,18 +276,22 @@ None.
 
 - **Method**: `POST`
 - **Path**: `/api/detect/video`
-- **Authentication**: None (Public in Phase 1)
-- **Service Called**: `VideoDetectionService.analyze_video`
-- **Request Headers**: `Content-Type: multipart/form-data`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Services Called**: `VideoDetectionService.analyze_video`, `ScanService.create_scan`, `ScanService.save_scan_result`
+- **Persistence**: Persists a `Scan` (modality `video`, `filename` set to uploaded filename, owned by authenticated user) in `PENDING` status, followed by an atomic commit of a `ScanResult` (`COMPLETED` status, timestamp, calculated `prediction` `DEEPFAKE` or `AUTHENTIC`, `confidence`, and `risk_level`). Raw video bytes are NOT stored in the database.
+- **Request Headers**:
+  - `Content-Type: multipart/form-data`
+  - `Authorization: Bearer <token>`
 - **Request Body**:
   - `video` (binary file): Supported formats: `.mp4`, `.mov`, `.avi`, `.mkv`.
 
 ### Validation Rules
-1. Form field name must be `video`.
-2. File must be present and non-empty.
-3. Extension must be in `{"mp4", "mov", "avi", "mkv"}`.
-4. Video file must have at least 1 readable frame.
-5. Max payload size: 50 MB.
+1. Request must contain a valid Bearer JWT in the `Authorization` header.
+2. Request must be `multipart/form-data` with form field name `video`.
+3. File must be present and filename non-empty.
+4. Extension must be in `{"mp4", "mov", "avi", "mkv"}`.
+5. Video file must have at least 1 readable frame.
+6. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
 
 ### Success Response (`200 OK`)
 ```json
@@ -310,6 +314,33 @@ None.
 ```
 
 ### Error Responses
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
 - **Missing `video` field (`400 Bad Request`)**:
   ```json
   {
@@ -335,6 +366,24 @@ None.
     "message": "Invalid video format. Allowed: avi, mkv, mov, mp4",
     "data": null,
     "error_code": "INVALID_FORMAT"
+  }
+  ```
+- **Unreadable / corrupted video stream (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Failed to open or decode video stream.",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Persistence Failure (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while persisting the scan results.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
   }
   ```
 

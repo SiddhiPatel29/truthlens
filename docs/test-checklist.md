@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-07
-- **Result Summary**: **147 passed, 0 failed, 0 skipped in 13.34s**
+- **Result Summary**: **159 passed, 0 failed, 0 skipped in 24.70s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -33,6 +33,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_video_detection.py` | `test_detect_video_missing_file_field` | Missing file in upload | **PASSED** | Returned HTTP 400 with `MISSING_FILE` |
 | `test_video_detection.py` | `test_detect_video_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
 | `test_video_detection.py` | `test_detect_video_unsupported_extension` | Unsupported file extension | **PASSED** | Returned HTTP 400 with `UNSUPPORTED_MEDIA_TYPE` |
+| `test_video_detection.py` | `test_detect_video_corrupt_content` | Corrupt video byte stream | **PASSED** | Returned HTTP 400 with `PROCESSING_ERROR` |
 | `test_audio_detection.py` | `test_detect_audio_success` | Valid audio analysis | **PASSED** | Returned HTTP 200 with spectral metrics |
 | `test_audio_detection.py` | `test_detect_audio_missing_file_field` | Missing file in upload | **PASSED** | Returned HTTP 400 with `MISSING_FILE` |
 | `test_audio_detection.py` | `test_detect_audio_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
@@ -159,13 +160,24 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_image_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
 | `test_image_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_image_persistence.py` | `test_multiple_authenticated_users_image_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
+| `test_video_persistence.py` | `test_valid_authenticated_video_request_persists_scan_and_result` | Valid video persistence | **PASSED** | Returned 200, Scan COMPLETED, filename 'test.mp4', ScanResult fields match |
+| `test_video_persistence.py` | `test_missing_auth_header_returns_401_no_scan_created` | Unauthenticated video request | **PASSED** | Returned 401 `AUTHENTICATION_REQUIRED`, 0 scans, video processing skipped |
+| `test_video_persistence.py` | `test_invalid_jwt_returns_401_no_scan_created` | Invalid Bearer token | **PASSED** | Returned 401 `INVALID_TOKEN`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_expired_jwt_returns_401_no_scan_created` | Expired Bearer token | **PASSED** | Returned 401 `TOKEN_EXPIRED`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_missing_video_file_field_preserves_400_no_scan_created` | Missing video field | **PASSED** | Returned 400 `MISSING_FILE`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_unsupported_video_extension_preserves_400_no_scan_created` | Unsupported video extension | **PASSED** | Returned 400 `INVALID_FORMAT`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_empty_filename_preserves_400_no_scan_created` | Empty filename | **PASSED** | Returned 400 `INVALID_FILE`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_corrupt_video_content_preserves_400_no_scan_created` | Corrupt video content | **PASSED** | Returned 400 `PROCESSING_ERROR`, 0 scans created in DB |
+| `test_video_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
+| `test_video_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
+| `test_video_persistence.py` | `test_multiple_authenticated_users_video_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
 
 ---
 
 ## 2. Live HTTP Server Verification Tests
 
 - **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
-- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`)
 - **Result Summary**: All live verification checks passed
 
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
@@ -177,7 +189,9 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/image` | POST | Multipart (`test.jpg`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/image` | POST | Multipart (`test.jpg`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/image` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
-| `/api/detect/video` | POST | Multipart (`test.mp4`) | 200 | 200 | True | **PASSED** |
+| `/api/detect/video` | POST | Multipart (`test.mp4`, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/video` | POST | Multipart (`test.mp4`, Missing Authorization) | 401 | 401 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`) | 200 | 200 | True | **PASSED** |
 | `/api/report/abuse` | POST | JSON (YouTube target) | 201 | 201 | True | **PASSED** |
 | `/api/report/abuse` | POST | JSON (TikTok target) | 400 | 400 | False | **PASSED** |

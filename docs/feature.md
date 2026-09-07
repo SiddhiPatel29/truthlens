@@ -30,6 +30,30 @@ This document records the features implemented during each development phase of 
 - **Tests**: `tests/test_error_handling.py` (4 tests passed).
 - **Current Status**: Complete.
 
+---
+
+## 16. Video Detection Scan Persistence (Phase 4 Step 4)
+- **Status**: Completed (Phase 4 Step 4).
+- **Reason**: Connect the existing video detection endpoint to authentication and scan persistence so that analyzed video scans are recorded, associated with the authenticated user, and transitioned to `COMPLETED` status with uploaded filename metadata.
+- **Files Changed / Created**:
+  - `backend/routes/video_routes.py` (Modified - protected with `@require_auth`, calls `ScanService.create_scan` with `filename=file.filename` and `ScanService.save_scan_result`, handles `ScanServiceError` cleanly)
+  - `tests/test_video_detection.py` (Modified - updated regression tests with authentication fixtures and headers, added corrupt content test)
+  - `tests/test_video_persistence.py` (New - 11 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Guards `POST /api/detect/video`, ensuring unauthenticated requests are rejected with standardized 401 responses before reading video streams or running OpenCV keyframe analysis.
+  - Forensic Mapping: Maps detector outputs (`is_deepfake`, `confidence_score`, `metrics`, `keyframe_heatmap_preview`) into `prediction` (`DEEPFAKE` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and deliberately constructed `result_data` JSON.
+  - Media Metadata: Records original uploaded filename in `Scan.filename`.
+  - Exclusion of Raw Binary Bytes: Heavy uploaded video files, uncompressed frames, and transient arrays are not stored in the database.
+  - Scan Lifecycle: Scan is created in `PENDING` status (`user_id=g.current_user_id`, `media_type="video"`, `filename=file.filename`), then updated atomically to `COMPLETED` with timestamp upon `save_scan_result()`.
+  - Failure Handling: Catches `ScanServiceError` and logs server-side without leaking raw SQL or database errors, returning sanitized HTTP 500.
+  - Preservation: Response envelope and detector data output remain completely backward-compatible. Audio and abuse routes remain public and unchanged.
+- **Tests**:
+  - `tests/test_video_persistence.py` (11 tests passed in 4.35s).
+  - `tests/test_video_detection.py` (5 tests passed in 0.59s).
+  - Complete test suite: 159 passed out of 159 tests in 24.70s.
+- **Current Status**: Complete.
+
+
 ### Feature 4: Media File Validation Refactoring
 - **Feature**: Reusable media validation helpers for image, video, and audio uploads.
 - **Reason**: Video and audio routes had duplicated inline file validation logic.
