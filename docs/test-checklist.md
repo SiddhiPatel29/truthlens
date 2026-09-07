@@ -124,6 +124,20 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_auth_authorization.py` | `test_auth_me_does_not_expose_password` | Plaintext password privacy | **PASSED** | Plaintext password absent from `/api/auth/me` |
 | `test_auth_authorization.py` | `test_jwt_remains_signed_using_existing_configuration` | Config integration | **PASSED** | Token verifiable using configured `JWT_SECRET_KEY` |
 | `test_auth_authorization.py` | `test_unexpected_server_exception_returns_500_not_masked_as_401` | Error bubbling preservation | **PASSED** | Internal route exception returns HTTP 500 `INTERNAL_SERVER_ERROR` |
+| `test_scan_service.py` | `test_create_scan_with_valid_user_id` | Scan persistence with user | **PASSED** | Persists id, user_id, media_type, filename, PENDING status, timestamp |
+| `test_scan_service.py` | `test_create_scan_anonymous_user_none` | Temporary schema compatibility | **PASSED** | Persists scan with `user_id=None` |
+| `test_scan_service.py` | `test_create_scan_invalid_media_type_raises_validation_error` | Media type validation | **PASSED** | Empty or non-string media_type raises `ScanValidationError` |
+| `test_scan_service.py` | `test_create_scan_invalid_user_id_raises_validation_error` | User ID validation | **PASSED** | Non-positive or non-integer user_id raises `ScanValidationError` |
+| `test_scan_service.py` | `test_save_scan_result_success_and_updates_scan` | Atomic result persistence & status | **PASSED** | Persists ScanResult, updates Scan to COMPLETED, sets completed_at |
+| `test_scan_service.py` | `test_save_scan_result_with_none_result_data_defaults_to_dict` | Result data defaulting | **PASSED** | None result_data defaults safely to empty dictionary |
+| `test_scan_service.py` | `test_save_scan_result_nonexistent_scan_raises_not_found` | Nonexistent scan lookup | **PASSED** | Unknown scan_id raises `ScanNotFoundError` |
+| `test_scan_service.py` | `test_save_scan_result_duplicate_raises_conflict_error` | 1-to-1 duplicate prevention | **PASSED** | Second result on same scan raises `ScanConflictError` |
+| `test_scan_service.py` | `test_save_scan_result_validation_failures` | Proportional outcome validation | **PASSED** | Invalid confidence, prediction, risk_level raise `ScanValidationError` |
+| `test_scan_service.py` | `test_get_scan_by_id_success` | Scan retrieval by primary key | **PASSED** | Retrieves matching Scan model |
+| `test_scan_service.py` | `test_get_scan_by_id_unknown_returns_none` | Scan retrieval not found | **PASSED** | Returns None for unknown or non-positive ID |
+| `test_scan_service.py` | `test_get_scan_result_by_scan_id_success` | Result retrieval by scan_id | **PASSED** | Retrieves matching ScanResult model |
+| `test_scan_service.py` | `test_get_scan_result_by_scan_id_unknown_returns_none` | Result retrieval not found | **PASSED** | Returns None for unknown scan_id or scan without result |
+| `test_scan_service.py` | `test_database_failure_causes_rollback_and_session_usable` | Rollback & session recovery | **PASSED** | DB error rolls back session, raises `ScanDatabaseError`, session usable |
 
 ---
 

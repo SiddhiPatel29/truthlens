@@ -350,4 +350,40 @@ Implement a reusable `@require_auth` route decorator in `backend/utils/auth.py` 
 - **Loading full `User` model from DB inside `@require_auth`**: Rejected due to unnecessary DB overhead on every request and loss of stateless JWT scalability.
 - **Catching all exceptions inside `@require_auth` and returning 401**: Rejected because it masks internal server errors and misleads API consumers and developers.
 
+---
+
+## Decision 18: Scan Persistence Foundation Architecture (`ScanService`)
+
+### Decision
+Encapsulate all database persistence, state transitions, and retrieval operations for forensic scans (`Scan`) and analysis results (`ScanResult`) inside a dedicated service layer module (`backend/services/scan_service.py`), keeping detection routes and public contracts untouched in Phase 4 Step 1.
+
+### Reasons & Architectural Principles
+
+1. **Why Persistence is Isolated in `ScanService`**:
+   The forensic detection services (`TextDetectionService`, `ImageDetectionService`, etc.) are designed as pure mathematical and signal-processing engines that operate on inputs and return data dictionaries without coupling to Flask request contexts or database sessions. Encapsulating persistence operations in `ScanService` preserves this clean separation of concerns, allows independent unit testing, and ensures reusable transaction semantics across all modalities.
+
+2. **Why Detection Routes are NOT Modified Yet**:
+   TruthLens evolves through strictly verified, incremental steps. Integrating persistence into `/api/detect/*` while simultaneously building the persistence service increases regression risk. By first stabilizing and testing `ScanService` with an extensive test suite, the subsequent route integration in Step 2 can be achieved with minimal complexity and maximum reliability.
+
+3. **Atomic Transactions at the Service Boundary**:
+   When saving a scan result, `ScanService.save_scan_result()` inserts the `ScanResult` and transitions parent `Scan.status` to `COMPLETED` (updating `completed_at` timestamp) within the exact same database transaction, committing once. If commit fails, `db.session.rollback()` atomically rolls back both operations, preventing orphaned results or inconsistent `PENDING` states.
+
+4. **Specific Database Exception Handling (`SQLAlchemyError`)**:
+   `ScanService` explicitly catches `SQLAlchemyError` to handle database transaction failures, execute session rollback, and raise `ScanDatabaseError`. It deliberately avoids broad `except Exception:` blocks, ensuring unexpected programming errors (e.g., `AttributeError`, `TypeError`) remain distinguishable and bubble to centralized error handlers without being disguised as database failures.
+
+5. **Why Duplicate `ScanResult` Creation is Rejected (`ScanConflictError`)**:
+   The database schema enforces a unique constraint on `ScanResult.scan_id` (1-to-1 relationship). If `save_scan_result()` is invoked for a scan that already possesses a result, the service proactively checks `scan.result` and raises a controlled `ScanConflictError` rather than triggering unhandled database integrity crashes or silently overwriting forensic evidence.
+
+6. **Why `Scan.user_id` Remains Nullable Temporarily**:
+   The `user_id` foreign key was made nullable in Phase 2 for schema compatibility before authentication existed. Although authentication and JWT tokens were completed in Phase 3, `user_id` remains nullable in this step as temporary schema compatibility because detection endpoints are not yet wired to require authentication. Modifying schema constraints or creating migrations is deferred until authenticated scan persistence is formally integrated.
+
+7. **Proportional Input Validation Without Artificial Constraints**:
+   The service validates that inputs are well-formed (non-empty strings, positive IDs, confidence floats bounded in `[0.0, 1.0]`) without hardcoding restrictive categorical sets (e.g. rigid prediction enums). This keeps the persistence layer flexible for future detection algorithms and new forensic modalities.
+
+### Alternatives Considered
+- **Directly persisting database records inside detection services**: Rejected because it couples pure signal algorithms to SQLAlchemy models and complicates testing.
+- **Directly invoking `db.session.add()` inside route controllers**: Rejected because it scatters transaction and status-transition logic across multiple route handlers.
+- **Overwriting existing `ScanResult` on duplicate save**: Rejected because forensic scan outcomes must be immutable records of an analysis event.
+
+
 

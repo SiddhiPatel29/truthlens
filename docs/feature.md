@@ -195,5 +195,25 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 112 passed out of 112 tests in 10.02s.
 - **Current Status**: Complete.
 
+---
+
+## 13. Scan Persistence Foundation (Phase 4 Step 1)
+- **Status**: Completed (Phase 4 Step 1).
+- **Reason**: Establish a reliable, transactional persistence foundation (`ScanService`) for persisting scans and analysis results without modifying detection routes or database schemas prematurely.
+- **Files Changed / Created**:
+  - `backend/services/scan_service.py` (New - `ScanService` with `create_scan`, `save_scan_result`, `get_scan_by_id`, `get_scan_result_by_scan_id`)
+  - `tests/test_scan_service.py` (New - 14 comprehensive unit and integration tests)
+- **Implementation**:
+  - `create_scan`: Validates `media_type` and optional `user_id`, creates `Scan` with status `PENDING`, commits transaction, rolls back on `SQLAlchemyError` (`ScanDatabaseError`).
+  - `save_scan_result`: Resolves target scan, verifies no existing result exists (`ScanConflictError`), creates `ScanResult`, updates parent `Scan.status` to `COMPLETED` and `completed_at` timestamp within the exact same database transaction, commits once, rolls back on `SQLAlchemyError` (`ScanDatabaseError`).
+  - `get_scan_by_id`: Simple retrieval helper returning `Scan` model or `None`.
+  - `get_scan_result_by_scan_id`: Simple retrieval helper returning `ScanResult` model or `None`.
+  - Proportional input validation: Enforces non-empty strings and confidence float bounded in `[0.0, 1.0]` without rigid categorical restrictions.
+  - Zero modifications to existing detection routes, authentication logic, or database schema.
+- **Tests**:
+  - `tests/test_scan_service.py` (14 tests passed in 0.88s).
+  - Complete test suite: 126 passed out of 126 tests in 9.49s.
+- **Current Status**: Complete.
+
 
 

@@ -34,7 +34,8 @@ truthlens/
 │   │   ├── video_service.py    # Keyframe extraction, anomaly scoring, temporal variance (OpenCV)
 │   │   ├── audio_service.py    # Zero-crossing rate, spectral energy, lip-sync desync (SciPy)
 │   │   ├── abuse_service.py    # Cryptographic SHA-256 fingerprinting & dossier builder
-│   │   └── auth_service.py     # User registration, login, scrypt hashing, JWT issuance & verification
+│   │   ├── auth_service.py     # User registration, login, scrypt hashing, JWT issuance & verification
+│   │   └── scan_service.py     # Scan & ScanResult transactional persistence, status management, retrieval
 │   └── utils/                  # Reusable cross-cutting utilities
 │       ├── auth.py             # @require_auth decorator, Bearer JWT validation, g.current_user_id
 │       ├── errors.py           # Centralized error handlers for 400, 404, 405, 413, 500
@@ -57,7 +58,8 @@ truthlens/
 │   ├── test_database.py        # Database models, constraints, relationships, and migration tests
 │   ├── test_auth_registration.py # User registration and password hashing tests
 │   ├── test_auth_login.py      # User login, anti-enumeration, and token generation tests
-│   └── test_auth_authorization.py # Route protection, Bearer validation, and claims tests
+│   ├── test_auth_authorization.py # Route protection, Bearer validation, and claims tests
+│   └── test_scan_service.py    # Scan and ScanResult transactional persistence and retrieval tests
 ├── .env.example                # Safe environment configuration template
 ├── requirements.txt            # Pinned production, database, and test dependencies
 └── test.{jpg,mp4,wav}          # Local multimodal test media assets
@@ -177,6 +179,8 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
   Validates target takedown platform (YouTube, X, Meta, Custom), generates a unique report UUID, computes a deterministic SHA-256 cryptographic digest of the manifest, maps the target platform to its compliance channel, and formats a takedown dossier.
 - **`AuthService`**:
   Validates registration parameters, normalizes email addresses (`strip().lower()`), verifies modern password policy (12–128 characters, no mandatory composition rules, whitespace/Unicode allowed, local weak-password blocklist), performs duplicate email checks, hashes passwords securely using Werkzeug's `generate_password_hash` (`scrypt`), and persists `User` records in the database. For login, verifies credentials via `check_password_hash`, enforces account active status, prevents user enumeration with generic 401 errors, and issues signed HS256 JWT access tokens with minimal claims (`sub`, `iat`, `exp`).
+- **`ScanService`**:
+  Encapsulates database persistence and query operations for forensic scans (`Scan`) and completed analysis results (`ScanResult`). Handles atomic transactions, transitions parent scan status from `PENDING` to `COMPLETED` with UTC timestamps, enforces 1-to-1 scan-to-result integrity (`ScanConflictError`), performs proportional input validation, and manages session rollback on database commit errors (`ScanDatabaseError`).
 
 ---
 

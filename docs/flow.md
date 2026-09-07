@@ -484,7 +484,70 @@ Client receives HTTP 200 OK with authenticated user_id
 
 ---
 
-## 10. Database Initialization & Session Lifecycle Flow
+## 10. Scan Persistence Service Flow (`create_scan` & `save_scan_result`)
+
+### A. Scan Creation Flow (`create_scan`)
+```
+Caller (e.g. Detection Service / Route in future steps)
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.create_scan()]
+  1. Input Validation:
+     - Validates user_id: positive integer or None
+     - Validates media_type: non-empty string, normalized via .strip().lower()
+     - Validates filename: optional string or None
+  │
+  ▼
+  2. Model Instantiation:
+     - Instantiates Scan(user_id=user_id, media_type=media_type, filename=filename, status="PENDING", created_at=now)
+  │
+  ▼
+  3. Database Transaction:
+     - db.session.add(scan)
+     - db.session.commit()
+     - If SQLAlchemyError: db.session.rollback(), raises ScanDatabaseError
+  │
+  ▼
+Returns Persisted Scan Model Instance
+```
+
+### B. Scan Result Persistence Flow (`save_scan_result`)
+```
+Caller (e.g. Analysis Completion Handler)
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.save_scan_result()]
+  1. Target Scan Lookup & Integrity Checks:
+     - Validates scan_id is positive integer
+     - Resolves Scan via db.session.get(Scan, scan_id)
+     - If not found: raises ScanNotFoundError
+     - Checks if scan.result already exists (one-to-one constraint)
+     - If exists: raises ScanConflictError
+  │
+  ▼
+  2. Outcome Validation:
+     - Validates prediction: non-empty string
+     - Validates confidence: float in [0.0, 1.0]
+     - Validates risk_level: non-empty string
+     - Validates result_data: dict or defaults to {}
+  │
+  ▼
+  3. Single Atomic Transaction:
+     - Instantiates ScanResult(scan_id=scan.id, prediction=..., confidence=..., risk_level=..., result_data=..., created_at=now)
+     - Updates parent Scan:
+         scan.status = "COMPLETED"
+         scan.completed_at = now
+     - db.session.add(scan_result)
+     - db.session.commit()
+     - If SQLAlchemyError: db.session.rollback(), raises ScanDatabaseError
+  │
+  ▼
+Returns Persisted ScanResult Model Instance (Parent Scan status is COMPLETED)
+```
+
+---
+
+## 11. Database Initialization & Session Lifecycle Flow
 
 ```
 Application Startup / Test Context:
@@ -517,7 +580,7 @@ Session Lifecycle:
 
 ---
 
-## 11. Migration Execution Flow (Flask-Migrate + Alembic)
+## 12. Migration Execution Flow (Flask-Migrate + Alembic)
 
 ```
 CLI Command: flask db upgrade
@@ -544,7 +607,7 @@ Database is upgraded and schema matches SQLAlchemy declarative models
 
 ---
 
-## 12. Centralized Error Execution Flow (400, 401, 404, 405, 413, 500)
+## 13. Centralized Error Execution Flow (400, 401, 404, 405, 413, 500)
 
 ```
 Client sends invalid or unhandled request:
@@ -570,4 +633,5 @@ Client sends invalid or unhandled request:
   ▼
 Client receives uniform JSON envelope with exact status code and zero internal info leakage
 ```
+
 
