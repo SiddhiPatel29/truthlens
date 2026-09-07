@@ -215,5 +215,28 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 126 passed out of 126 tests in 9.49s.
 - **Current Status**: Complete.
 
+---
+
+## 14. Text Detection Scan Persistence (Phase 4 Step 2)
+- **Status**: Completed (Phase 4 Step 2).
+- **Reason**: Connect the existing text detection endpoint to authentication and scan persistence so that analyzed text scans are recorded, associated with the authenticated user, and transitioned to `COMPLETED` status.
+- **Files Changed / Created**:
+  - `backend/routes/text_routes.py` (Modified - protected with `@require_auth`, calls `ScanService.create_scan` and `ScanService.save_scan_result`, handles `ScanServiceError` cleanly)
+  - `tests/test_text_detection.py` (Modified - updated regression tests with authentication fixtures and headers)
+  - `tests/test_error_handling.py` (Modified - added auth header in 413 oversized payload test)
+  - `tests/test_text_persistence.py` (New - 10 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Guards `POST /api/detect/text`, ensuring unauthenticated requests are rejected with standardized 401 responses.
+  - Forensic Mapping: Maps detector outputs (`is_ai_generated`, `ai_confidence_score`, `metrics`, `sentence_breakdown`) into `prediction` (`AI_GENERATED` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and `result_data` JSON.
+  - Scan Lifecycle: Scan is created in `PENDING` status (`user_id=g.current_user_id`, `media_type="text"`, `filename=None`), then updated atomically to `COMPLETED` with timestamp upon `save_scan_result()`.
+  - Failure Handling: Catches `ScanServiceError` and logs server-side without leaking raw SQL or database errors, returning sanitized HTTP 500.
+  - Preservation: Response envelope and detector data output remain completely backward-compatible. Image, video, audio, and abuse routes remain public and unchanged.
+- **Tests**:
+  - `tests/test_text_persistence.py` (10 tests passed in 2.25s).
+  - `tests/test_text_detection.py` (5 tests passed in 1.28s).
+  - Complete test suite: 136 passed out of 136 tests in 9.70s.
+- **Current Status**: Complete.
+
+
 
 

@@ -7,8 +7,8 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 ## 1. Automated Unit & Integration Tests (Pytest)
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
-- **Execution Date**: 2026-09-06
-- **Result Summary**: **89 passed, 0 failed, 0 skipped in 5.09s**
+- **Execution Date**: 2026-09-07
+- **Result Summary**: **136 passed, 0 failed, 0 skipped in 9.70s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -138,6 +138,16 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_scan_service.py` | `test_get_scan_result_by_scan_id_success` | Result retrieval by scan_id | **PASSED** | Retrieves matching ScanResult model |
 | `test_scan_service.py` | `test_get_scan_result_by_scan_id_unknown_returns_none` | Result retrieval not found | **PASSED** | Returns None for unknown scan_id or scan without result |
 | `test_scan_service.py` | `test_database_failure_causes_rollback_and_session_usable` | Rollback & session recovery | **PASSED** | DB error rolls back session, raises `ScanDatabaseError`, session usable |
+| `test_text_persistence.py` | `test_valid_authenticated_text_request_persists_scan_and_result` | Valid text persistence | **PASSED** | Returned 200, Scan COMPLETED, user_id matches, ScanResult fields match |
+| `test_text_persistence.py` | `test_missing_auth_header_returns_401_no_scan_created` | Unauthenticated request | **PASSED** | Returned 401 `AUTHENTICATION_REQUIRED`, 0 scans created in DB |
+| `test_text_persistence.py` | `test_invalid_jwt_returns_401_no_scan_created` | Invalid Bearer token | **PASSED** | Returned 401 `INVALID_TOKEN`, 0 scans created in DB |
+| `test_text_persistence.py` | `test_expired_jwt_returns_401_no_scan_created` | Expired Bearer token | **PASSED** | Returned 401 `TOKEN_EXPIRED`, 0 scans created in DB |
+| `test_text_persistence.py` | `test_invalid_text_request_too_short_preserves_400_no_scan_created` | Text under 20 chars | **PASSED** | Returned 400 `TEXT_TOO_SHORT`, 0 scans created in DB |
+| `test_text_persistence.py` | `test_invalid_text_request_missing_field_preserves_400_no_scan_created` | Missing text field | **PASSED** | Returned 400 `INVALID_INPUT`, 0 scans created in DB |
+| `test_text_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
+| `test_text_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
+| `test_text_persistence.py` | `test_multiple_authenticated_users_scan_ownership_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans isolated strictly by user_id |
+| `test_text_persistence.py` | `test_authentic_text_persists_authentic_prediction` | Authentic text prediction | **PASSED** | Varied text persisted with prediction `AUTHENTIC` |
 
 ---
 
@@ -150,8 +160,9 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
 | `/api/health` | GET | None | 200 | 200 | True | **PASSED** |
-| `/api/detect/text` | POST | JSON (> 20 chars) | 200 | 200 | True | **PASSED** |
-| `/api/detect/text` | POST | JSON (< 20 chars) | 400 | 400 | False | **PASSED** |
+| `/api/detect/text` | POST | JSON (> 20 chars, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/text` | POST | JSON (Missing Authorization) | 401 | 401 | False | **PASSED** |
+| `/api/detect/text` | POST | JSON (< 20 chars, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/image` | POST | Multipart (`test.jpg`) | 200 | 200 | True | **PASSED** |
 | `/api/detect/video` | POST | Multipart (`test.mp4`) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`) | 200 | 200 | True | **PASSED** |

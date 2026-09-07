@@ -63,9 +63,12 @@ None.
 
 - **Method**: `POST`
 - **Path**: `/api/detect/text`
-- **Authentication**: None (Public in Phase 1)
-- **Service Called**: `TextDetectionService.analyze_text`
-- **Request Headers**: `Content-Type: application/json`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Services Called**: `TextDetectionService.analyze_text`, `ScanService.create_scan`, `ScanService.save_scan_result`
+- **Persistence**: Persists a `Scan` (modality `text`, owned by the authenticated user) in `PENDING` status, followed by an atomic commit of a `ScanResult` (`COMPLETED` status, timestamp, calculated `prediction`, `confidence`, and `risk_level`).
+- **Request Headers**:
+  - `Content-Type: application/json`
+  - `Authorization: Bearer <token>`
 - **Request Body**:
 ```json
 {
@@ -74,9 +77,10 @@ None.
 ```
 
 ### Validation Rules
-1. Body must be valid JSON object containing key `"text"`.
-2. `"text"` must be a string.
-3. `len(text.strip()) >= 20` characters.
+1. Request must contain a valid Bearer JWT in the `Authorization` header.
+2. Body must be valid JSON object containing key `"text"`.
+3. `"text"` must be a string.
+4. `len(text.strip()) >= 20` characters.
 
 ### Success Response (`200 OK`)
 ```json
@@ -105,6 +109,33 @@ None.
 ```
 
 ### Error Responses
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
 - **Missing or non-string `"text"` field (`400 Bad Request`)**:
   ```json
   {
@@ -121,6 +152,15 @@ None.
     "message": "Text is too short. Please provide at least 20 characters for meaningful analysis.",
     "data": null,
     "error_code": "TEXT_TOO_SHORT"
+  }
+  ```
+- **Persistence Failure (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while persisting the scan results.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
   }
   ```
 

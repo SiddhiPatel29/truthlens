@@ -385,5 +385,37 @@ Encapsulate all database persistence, state transitions, and retrieval operation
 - **Directly invoking `db.session.add()` inside route controllers**: Rejected because it scatters transaction and status-transition logic across multiple route handlers.
 - **Overwriting existing `ScanResult` on duplicate save**: Rejected because forensic scan outcomes must be immutable records of an analysis event.
 
+---
+
+## Decision 19: Text Detection Scan Persistence & Route Authorization (Phase 4 Step 2)
+
+### Decision
+Connect `POST /api/detect/text` to `@require_auth` and `ScanService`, persisting the text scan and its forensic results with user ownership, while preserving the API response envelope, input validation rules, and detector output structures. All other detection endpoints (`image`, `video`, `audio`, `abuse`) remain public and unpersisted in this step.
+
+### Reasons & Architectural Principles
+
+1. **Why `POST /api/detect/text` Now Requires Authentication (`@require_auth`)**:
+   A persisted forensic scan record represents user-owned data in the system. To establish clean data ownership without generating anonymous orphaned records in the database, `POST /api/detect/text` requires a valid Bearer JWT access token. Unauthenticated requests are rejected with standardized HTTP 401 responses (`AUTHENTICATION_REQUIRED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`), preventing database pollution and ensuring every persisted scan has an identifiable owner.
+
+2. **Why Image/Video/Audio and Abuse Endpoints Remain Unmodified in this Step**:
+   In adherence to the feature-by-feature incremental development methodology, only the text modality is connected to persistence in Step 2. Keeping media detection endpoints (`image`, `video`, `audio`) and `abuse` reporting public and unchanged prevents broad blast radiuses, simplifies regression testing, and allows each modality's specific payload and persistence characteristics (e.g. file storage, hashes) to be addressed deliberately in future steps.
+
+3. **Separation of Concerns: Detector Output Mapping via `ScanService`**:
+   `TextDetectionService.analyze_text` remains a pure analytical engine returning forensic metrics (`is_ai_generated`, `ai_confidence_score`, `metrics`, `sentence_breakdown`). The route maps these existing values into `ScanService.create_scan()` and `ScanService.save_scan_result()`:
+   - `user_id = g.current_user_id`
+   - `media_type = "text"`
+   - `filename = None` (text has no uploaded file)
+   - `confidence = float(result.get("ai_confidence_score", 0.0))`
+   - `prediction = "AI_GENERATED" if is_ai else "AUTHENTIC"`
+   - `risk_level = "HIGH" if confidence >= 0.7 else ("MEDIUM" if confidence >= 0.4 else "LOW")`
+   - `result_data = result` (full forensic dictionary stored as JSON)
+
+4. **Transaction Boundaries and Route-Level Failure Handling**:
+   `ScanService.create_scan` and `ScanService.save_scan_result` manage their own database transactions and rollback semantics internally. The route controller does not touch `db.session` directly. If persistence fails after analysis, the route catches `ScanServiceError` and logs the exception server-side while returning a sanitized HTTP 500 response (`INTERNAL_SERVER_ERROR`), preventing raw database or SQL leakage to clients and ensuring no misleading successful response is returned.
+
+5. **No Schema Changes or Migrations Required**:
+   `Scan` and `ScanResult` tables created in Phase 2 already support `media_type="text"`, nullable `filename`, foreign key `user_id`, and native JSON `result_data`. No schema modifications or database migrations were necessary.
+
+
 
 

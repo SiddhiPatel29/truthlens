@@ -31,15 +31,30 @@ def test_405_method_not_allowed_returns_json(client):
 
 def test_413_payload_too_large_returns_json():
     """Verify oversized payloads trigger 413 JSON response."""
+    import time
+    import jwt
+
     class TinyConfig(Config):
         TESTING = True
         MAX_CONTENT_LENGTH = 100  # 100 bytes max
+        JWT_SECRET_KEY = "test-tiny-jwt-secret-key"
         
     app = create_app(TinyConfig)
     tiny_client = app.test_client()
+
+    now = int(time.time())
+    token = jwt.encode(
+        {"sub": "1", "iat": now, "exp": now + 3600},
+        "test-tiny-jwt-secret-key",
+        algorithm="HS256"
+    )
     
     large_payload = {"text": "A" * 500}
-    response = tiny_client.post("/api/detect/text", json=large_payload)
+    response = tiny_client.post(
+        "/api/detect/text",
+        json=large_payload,
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 413
     assert response.is_json
     

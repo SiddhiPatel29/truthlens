@@ -75,11 +75,22 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
      - Proportional validation: Enforces non-empty strings and confidence float in `[0.0, 1.0]` without hard-coded prediction enums.
    - Created `tests/test_scan_service.py` with 14 comprehensive tests.
    - Total test suite expanded to **126 passed tests in 9.49s**.
+2. **Text Detection Scan Persistence (Step 2)**:
+   - Connected `POST /api/detect/text` to `@require_auth` and `ScanService`.
+   - Identified authenticated user from `g.current_user_id` populated by `@require_auth`.
+   - Persisted scan in `PENDING` status (`media_type="text"`, `filename=None`, `user_id=g.current_user_id`).
+   - Mapped detector output into `prediction` (`AI_GENERATED` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and `result_data` JSON.
+   - Saved result atomically and transitioned scan to `COMPLETED` status with UTC timestamp via `ScanService.save_scan_result()`.
+   - Caught `ScanServiceError` cleanly to log server-side and return sanitized HTTP 500 without leaking raw database/SQL details.
+   - Preserved all existing response envelope fields, detector output format, and 400 validation behavior.
+   - Kept image, video, audio, and abuse detection endpoints public and unmodified.
+   - Created `tests/test_text_persistence.py` with 10 comprehensive tests.
+   - Total test suite expanded to **136 passed tests in 9.70s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 4 Step 1 (Scan Persistence Foundation) is complete and verified. Ready for user commit and Phase 4 Step 2 (integrating persistence into detection routes).
+- Phase 4 Step 2 (Text Detection Scan Persistence) is complete and verified with 136/136 tests passing. Ready for user commit.
 
 ---
 
@@ -95,13 +106,13 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Atomic Single-Transaction Commit**: `save_scan_result` persists the `ScanResult` and updates the parent `Scan` in one atomic commit, rolling back on failure.
 - **Controlled One-to-One Conflict Rejection**: Proactively raises `ScanConflictError` when attempting to attach a duplicate result to a scan.
 - **Specific Database Error Handling**: Specifically catches `SQLAlchemyError` for session rollback and `ScanDatabaseError`, allowing unexpected programming errors to bubble up naturally.
-- **Temporary Nullable `Scan.user_id`**: Maintained for schema compatibility until detection routes are wired with authentication in subsequent steps.
+- **Authenticated Text Persistence**: `POST /api/detect/text` requires Bearer JWT; scan is owned by authenticated user; unauthenticated requests return standardized 401.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
 
 ## 5. Known Limitations & Remaining Problems
-1. **Stateless Detection Endpoints**: Detection endpoints compute and return results directly to the client but do not yet invoke `ScanService` (deferred to Phase 4 Step 2).
+1. **Unpersisted Media Endpoints**: Image, video, and audio detection endpoints compute and return results directly to the client but do not yet invoke `ScanService` (deferred to subsequent Phase 4 steps).
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
 3. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening.
 4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
@@ -109,10 +120,11 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 
 ---
 
-## 6. Recommended Next Backend Task (Phase 4 — Step 2)
-Implement **Phase 4 Step 2: Detection Route Persistence Integration**:
-1. Wire `ScanService.create_scan` into `/api/detect/*` endpoints to record incoming scans.
-2. Bind `g.current_user_id` to `Scan.user_id` when authenticated; allow anonymous `user_id=None` when unauthenticated.
-3. Wire `ScanService.save_scan_result` to persist detection outcomes upon analysis completion.
-4. Add integration tests verifying end-to-end detection-to-persistence pipeline.
+## 6. Recommended Next Backend Task (Phase 4 — Step 3)
+Implement **Phase 4 Step 3: Image Detection Scan Persistence**:
+1. Wire `@require_auth` into `POST /api/detect/image`.
+2. Persist image scan with `media_type="image"`, `filename=original_filename`, and `user_id=g.current_user_id`.
+3. Map image analysis output (`is_deepfake`, `confidence_score`, heatmap preview) to `ScanResult`.
+4. Add focused image persistence tests and ensure zero regressions across other modalities.
+
 

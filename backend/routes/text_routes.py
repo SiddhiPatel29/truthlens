@@ -2,18 +2,23 @@
 Text Detection API Routes.
 """
 import logging
-from flask import Blueprint, request
+from flask import Blueprint, request, g
 from backend.services.text_service import TextDetectionService
+from backend.services.scan_service import ScanService, ScanServiceError
+from backend.utils.auth import require_auth
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
 text_bp = Blueprint("text", __name__)
 
 @text_bp.route("/detect/text", methods=["POST"])
+@require_auth
 def detect_text():
     """
     POST /api/detect/text
     Request Body: { "text": "Content to evaluate..." }
+    Requires Bearer JWT Authorization header.
+    Persists scan and forensic outcome for the authenticated user.
     """
     body = request.get_json(silent=True)
     
@@ -44,12 +49,6 @@ def detect_text():
 
     try:
         result = TextDetectionService.analyze_text(input_text)
-        return api_response(
-            success=True,
-            message="Text analyzed successfully.",
-            data=result,
-            status_code=200
-        )
     except ValueError as e:
         logger.warning("Text processing validation failed: %s", str(e))
         return api_response(
@@ -66,3 +65,48 @@ def detect_text():
             error_code="INTERNAL_SERVER_ERROR",
             status_code=500
         )
+
+    # Persist scan and forensic outcome for authenticated user
+    try:
+        user_id = g.current_user_id
+        scan = ScanService.create_scan(
+            user_id=user_id,
+            media_type="text",
+            filename=None
+        )
+
+        confidence = float(result.get("ai_confidence_score", 0.0))
+        is_ai = bool(result.get("is_ai_generated", False))
+        prediction = "AI_GENERATED" if is_ai else "AUTHENTIC"
+        risk_level = "HIGH" if confidence >= 0.7 else ("MEDIUM" if confidence >= 0.4 else "LOW")
+
+        ScanService.save_scan_result(
+            scan_id=scan.id,
+            prediction=prediction,
+            confidence=confidence,
+            risk_level=risk_level,
+            result_data=result
+        )
+    except ScanServiceError as e:
+        logger.exception("Scan persistence failed for user %s: %s", getattr(g, "current_user_id", None), str(e))
+        return api_response(
+            success=False,
+            message="An error occurred while persisting the scan results.",
+            error_code="INTERNAL_SERVER_ERROR",
+            status_code=500
+        )
+    except Exception as e:
+        logger.exception("Unexpected error during scan persistence: %s", str(e))
+        return api_response(
+            success=False,
+            message="An unexpected error occurred while saving the scan.",
+            error_code="INTERNAL_SERVER_ERROR",
+            status_code=500
+        )
+
+    return api_response(
+        success=True,
+        message="Text analyzed successfully.",
+        data=result,
+        status_code=200
+    )
