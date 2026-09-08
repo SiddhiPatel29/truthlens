@@ -398,6 +398,36 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 214 passed out of 214 tests in 44.17s.
 - **Current Status**: Complete.
 
+---
+
+## 21. Audio Decoding & Format Integrity Hardening (Phase 5 Step 4)
+- **Status**: Completed (Phase 5 Step 4).
+- **Reason**: Eliminate the dangerous vulnerability where decoding failures silently generated synthetic random Gaussian noise (`np.random.normal(0, 0.1, 16000 * 3)`), producing fabricated detection results that were persisted into the forensic database. Restrict supported audio formats honestly to WAV (Option A) to match active decoder capabilities, validate decoded audio buffer integrity, enforce deterministic temporary file removal, and guarantee zero database persistence on rejected uploads.
+- **Files Changed / Created**:
+  - `backend/services/audio_service.py` (Modified - removed `np.random.normal` fallback; propagated clean `ValueError` on decode failure; validated `data.size > 0` and `sample_rate > 0`; ensured deterministic `try...finally` tempfile cleanup with warning logging on `OSError`)
+  - `backend/utils/file_validator.py` (Modified - restricted `ALLOWED_AUDIO_EXTENSIONS` to `{"wav"}` to eliminate false claims of MP3/M4A/FLAC support for `scipy.io.wavfile`)
+  - `tests/test_audio_detection.py` (Modified - added 10 tests for corrupt content, empty WAV, unsupported formats, elimination of synthetic noise fallback, buffer validation, and tempfile cleanup)
+  - `tests/test_audio_persistence.py` (Modified - added 5 persistence invariant tests for corrupt, empty, unsupported, decoder failure, and zero-sample uploads)
+  - `docs/decision.md` (Updated - added Decision 26)
+  - `docs/flow.md` (Updated - updated Audio Detection flow with validation, error propagation, buffer checks, and cleanup)
+  - `docs/bug.md` (Updated - added Bug 8 SEC-03)
+  - `docs/test-checklist.md` (Updated - updated test counts to 234 passed and added audio test matrices)
+  - `docs/context.md` (Updated - updated current status, architectural decisions, and next steps)
+  - `docs/api/backend-api.md` (Updated - updated audio endpoint specs, WAV format restriction, and error responses)
+- **Implementation**:
+  - **Elimination of Fabricated Forensics**: Any failure to read or decode audio raises `ValueError("Failed to decode audio file. File might be corrupted or in an unsupported format.")`. The synthetic random normal generator was completely eliminated.
+  - **Option A (WAV-Only Policy)**: Set `ALLOWED_AUDIO_EXTENSIONS = {"wav"}`. Non-WAV audio formats (`.mp3`, `.m4a`, `.flac`) fail fast at the validation boundary with HTTP 400 `INVALID_FORMAT`.
+  - **Buffer Bounds**: Decoded buffers with zero samples (`data.size == 0`) or non-positive sample rates (`sample_rate <= 0`) immediately raise `ValueError`, preventing downstream division-by-zero crashes.
+  - **Deterministic Cleanup**: `AudioDetectionService.analyze_audio()` wraps processing in `try...finally`. If `os.remove(temp_path)` fails, a warning is logged with error details instead of crashing or leaking files.
+  - **Persistence Invariant**: Route catches `ValueError`, returning HTTP 400 `PROCESSING_ERROR` before calling `ScanService.create_scan()`. Corrupt, empty, or unreadable audio creates 0 `Scan` and 0 `ScanResult` records in the database.
+  - **Algorithm Preservation**: Stereo-to-mono downmixing, peak normalization, ZCR, spectral energy variance, confidence scoring, lip-sync anomaly windows, risk level mappings, and success envelopes remain 100% identical for valid WAV files.
+- **Tests**:
+  - `tests/test_audio_detection.py` (17 passed in 6.97s).
+  - `tests/test_audio_persistence.py` (18 passed in 6.96s).
+  - Complete test suite: **234 passed out of 234 tests in 51.27s**.
+- **Current Status**: Complete.
+
+
 
 
 

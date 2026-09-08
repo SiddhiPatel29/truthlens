@@ -4,7 +4,7 @@ Provides basic extension and filename validation for uploaded media.
 """
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv"}
-ALLOWED_AUDIO_EXTENSIONS = {"wav", "mp3", "m4a", "flac"}
+ALLOWED_AUDIO_EXTENSIONS = {"wav"}
 
 def allowed_file(filename: str, allowed_set: set) -> bool:
     """Checks if file has a permitted extension."""

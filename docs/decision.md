@@ -589,6 +589,46 @@ Enforce strict image dimension and pixel limits (`MAX_IMAGE_WIDTH = 4096`, `MAX_
 5. **Detection Algorithm Semantics Preserved**:
    Frame sampling count (16), uniform linspace sampling, Laplacian variance calculations, anomaly score heuristics, temporal instability std-dev, 0.65 deepfake threshold, risk level mappings, and response envelopes remain 100% identical.
 
+---
+
+## Decision 26: Audio Decoding Integrity, Elimination of Synthetic Fallback, and WAV-Only Format Policy (Phase 5 Step 4)
+
+### Decision
+1. Remove the silent synthetic Gaussian noise fallback (`np.random.normal(...)`) in `AudioDetectionService.analyze_audio`. Decoding failures from `scipy.io.wavfile.read` must immediately propagate a `ValueError` indicating that the audio file is corrupted or unsupported.
+2. Adopt **Option A (Preferred)** for format support: Restrict `ALLOWED_AUDIO_EXTENSIONS` in `backend/utils/file_validator.py` strictly to `{"wav"}` because `scipy.io.wavfile.read()` is the active decoder and natively only supports RIFF/WAVE containers. Non-WAV formats (`.mp3`, `.m4a`, `.flac`) are rejected fast at the route boundary with HTTP 400 (`INVALID_FORMAT`).
+3. Validate the decoded audio buffer: If the decoded NumPy array has zero size (`data.size == 0`) or the detected sample rate is non-positive (`sample_rate <= 0`), immediately raise `ValueError` to prevent divide-by-zero errors or invalid duration calculations.
+4. Enforce deterministic temporary file cleanup within a `finally:` block in `AudioDetectionService.analyze_audio`. If `os.remove(temp_path)` fails, log a warning with the error details instead of silently ignoring it.
+5. Uphold the strict persistence invariant: Corrupted, empty, or unreadable audio uploads must result in an immediate HTTP 400 response and **zero** `Scan` or `ScanResult` records persisted in the database.
+
+### Reasons & Architectural Principles
+
+1. **Why Synthetic Noise Fallback Is Unacceptable in Forensic Systems**:
+   Previously, when `scipy.io.wavfile.read()` failed to decode an audio file (e.g. Due to corrupt headers, unsupported compression codecs, or non-WAV bytes), the service caught the exception and synthesized 3 seconds of pseudo-random Gaussian noise at 16 kHz. This artificial waveform was then fed into the Zero Crossing Rate (ZCR) and energy variance estimators, generating an arbitrary synthetic/authentic verdict that was saved into the audit database as genuine forensic intelligence. In a legal, evidentiary, or journalistic verification platform, fabricating results for unreadable files is catastrophic. An unreadable file must always be cleanly rejected without generating or persisting any analysis.
+
+2. **Why Option A (Restricting to WAV Only) Was Selected**:
+   The TruthLens backend relies on `scipy.io.wavfile.read()` for audio decoding without external binary dependencies (such as ffmpeg or librosa). Although earlier configurations listed `mp3`, `m4a`, and `flac` as allowed extensions, `scipy.io.wavfile.read()` cannot parse these compressed or alternative container formats. Keeping them in the allowed extension list created a false expectation of support and forced non-WAV uploads to hit the decoder error path. Restricting `ALLOWED_AUDIO_EXTENSIONS = {"wav"}` makes the API contract honest and reliable. Support for compressed audio formats (e.g. via a dedicated transcoding pipeline) is deferred to future roadmap phases.
+
+3. **Buffer Integrity and Sample Rate Validation**:
+   Even if a file conforms superficially to the WAV container structure, truncated or malformed chunks can yield empty data arrays (`data.shape == (0,)`) or corrupt sample rate headers (`sample_rate <= 0`). Explicitly checking `data.size == 0` and `sample_rate <= 0` avoids subsequent division-by-zero crashes when computing duration (`len(data) / float(sample_rate)`) or normalized ZCR (`zero_crossings / max(1, len(data))`).
+
+4. **Deterministic Temporary File Cleanup**:
+   Saving incoming audio streams to temporary disk files is necessary because `scipy.io.wavfile.read()` operates most reliably on disk paths or seekable file descriptors. Wrapping file reading and array transformations inside `try...finally` guarantees that `os.remove(temp_path)` is executed whether decoding succeeds, decoding fails, or an unexpected runtime exception occurs. Failure to clean up temporary files is logged with warning severity.
+
+5. **Zero-Scan Persistence Invariant**:
+   In `backend/routes/audio_routes.py`, `ScanService.create_scan()` is invoked strictly *after* `AudioDetectionService.analyze_audio()` completes without exception. When an invalid, corrupted, or empty file causes `analyze_audio()` to raise `ValueError`, the route catches the error, returns HTTP 400 (`PROCESSING_ERROR`), and aborts before creating any database records. Exactly 0 scans and 0 scan results are persisted for rejected audio uploads.
+
+6. **Preservation of Forensic Algorithm Semantics**:
+   For valid, readable WAV uploads, all forensic analysis semantics remain unchanged:
+   - Stereo to mono downmixing via `.mean(axis=1)`.
+   - Peak amplitude normalization.
+   - Zero Crossing Rate (ZCR) calculation.
+   - Spectral energy variance computation.
+   - Spectral anomaly and confidence score derivation ($[0.12, 0.97]$).
+   - Synthetic threshold ($> 0.65$).
+   - Lip-sync desynchronization event window extraction.
+   - Risk level categorization (`HIGH`, `MEDIUM`, `LOW`).
+
+
 
 
 

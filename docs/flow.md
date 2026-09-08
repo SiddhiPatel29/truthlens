@@ -309,24 +309,30 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
   1. Checks "audio" in request.files
      - If missing: returns api_response(False, "...", None, "MISSING_FILE", 400)
   2. Validates file via [backend/utils/file_validator.py: validate_audio_file(file)]
-     - Verifies filename not empty and extension in {"wav", "mp3", "m4a", "flac"}
+     - Verifies filename not empty and extension in {"wav"} (Option A: WAV-only policy for scipy decoder)
      - If invalid: returns api_response(False, err_msg, None, err_code, 400)
   │
   ▼
 [backend/services/audio_service.py: AudioDetectionService.analyze_audio(file)]
   1. Saves stream to temporary file: tempfile.mkstemp(suffix=".wav")
-  2. try...finally guarantees os.remove(temp_path) is called
-  3. Decodes WAV stream: scipy.io.wavfile.read(temp_path)
+  2. Decodes WAV stream: scipy.io.wavfile.read(temp_path)
+     - If decoding fails: raises ValueError (propagates clean error; NO synthetic random noise fallback)
+  3. Validates decoded buffer:
+     - If data.size == 0: raises ValueError ("Uploaded audio contains zero readable audio samples.")
+     - If sample_rate <= 0: raises ValueError ("Uploaded audio has an invalid sample rate.")
   4. Converts stereo to mono if multi-channel (data.mean(axis=1))
   5. Computes Zero Crossing Rate (ZCR): np.sum(np.diff(data > 0) != 0) / len(data)
   6. Computes spectral energy variance: np.var(data)
   7. Estimates synthetic vocal confidence score
   8. Flags temporal lip-sync discrepancy window intervals
-  9. Returns analysis dictionary
+  9. finally block guarantees deterministic cleanup:
+     - os.remove(temp_path) executes on success, decoder failure, or processing exception
+     - Cleanup failures log a warning without crashing the response
+  10. Returns analysis dictionary
   │
   ▼
 [backend/routes/audio_routes.py: detect_audio()]
-  Catches ValueError -> returns api_response(False, str(e), None, "PROCESSING_ERROR", 400)
+  Catches ValueError -> returns api_response(False, str(e), None, "PROCESSING_ERROR", 400) (zero DB persistence)
   Catches Exception  -> logs traceback via logger.exception(), returns sanitized 500 error
   │
   ▼

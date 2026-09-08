@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-08
-- **Result Summary**: **198 passed, 0 failed, 0 skipped in 25.21s**
+- **Result Summary**: **234 passed, 0 failed, 0 skipped in 51.27s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -55,8 +55,17 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_video_detection.py` | `test_detect_video_dynamic_tempfile_suffix` | Dynamic extension suffix | **PASSED** | `.mov`, `.avi`, `.mkv` files create matching temporary suffixes |
 | `test_audio_detection.py` | `test_detect_audio_success` | Valid audio analysis | **PASSED** | Returned HTTP 200 with spectral metrics |
 | `test_audio_detection.py` | `test_detect_audio_missing_file_field` | Missing file in upload | **PASSED** | Returned HTTP 400 with `MISSING_FILE` |
-| `test_audio_detection.py` | `test_detect_audio_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
-| `test_audio_detection.py` | `test_detect_audio_unsupported_extension` | Unsupported file extension | **PASSED** | Returned HTTP 400 with `UNSUPPORTED_MEDIA_TYPE` |
+| `test_audio_detection.py` | `test_detect_audio_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `INVALID_FILE` |
+| `test_audio_detection.py` | `test_detect_audio_unsupported_extension` | Unsupported file extension | **PASSED** | Returned HTTP 400 with `INVALID_FORMAT` |
+| `test_audio_detection.py` | `test_detect_audio_unsupported_formats_rejected` | Rejected MP3/M4A/FLAC/OGG/AAC | **PASSED** | Non-WAV formats rejected with 400 `INVALID_FORMAT` |
+| `test_audio_detection.py` | `test_detect_audio_corrupt_content` | Corrupt WAV content rejected | **PASSED** | Invalid byte stream returns 400 `PROCESSING_ERROR` |
+| `test_audio_detection.py` | `test_detect_audio_empty_wav` | Empty WAV content rejected | **PASSED** | 0-byte WAV returns 400 `PROCESSING_ERROR` |
+| `test_audio_detection.py` | `test_detect_audio_no_synthetic_noise_fallback` | Elimination of synthetic fallback | **PASSED** | wavfile.read failure raises 400, `np.random` never invoked |
+| `test_audio_detection.py` | `test_detect_audio_zero_samples_buffer_rejected` | Zero sample buffer validation | **PASSED** | Decoded buffer with size 0 returns 400 `PROCESSING_ERROR` |
+| `test_audio_detection.py` | `test_detect_audio_invalid_sample_rate_rejected` | Sample rate validation | **PASSED** | Non-positive sample rate returns 400 `PROCESSING_ERROR` |
+| `test_audio_detection.py` | `test_detect_audio_tempfile_cleanup_on_success` | Temp file removal on success | **PASSED** | Temp audio file removed from disk after 200 response |
+| `test_audio_detection.py` | `test_detect_audio_tempfile_cleanup_on_decoder_failure` | Temp file removal on decode error | **PASSED** | Temp audio file removed from disk after 400 response |
+| `test_audio_detection.py` | `test_detect_audio_tempfile_cleanup_on_processing_exception` | Temp file removal on exception | **PASSED** | Temp audio file removed from disk on unhandled exception |
 | `test_abuse_report.py` | `test_dispatch_abuse_report_success` | Valid report submission | **PASSED** | Returned HTTP 200 with dossier payload |
 | `test_abuse_report.py` | `test_dispatch_abuse_report_unsupported_platform` | Unknown platform report | **PASSED** | Returned HTTP 400 with `UNSUPPORTED_PLATFORM` |
 | `test_abuse_report.py` | `test_dispatch_abuse_report_missing_target_url` | Missing target URL | **PASSED** | Returned HTTP 400 with `MISSING_FIELD` |
@@ -206,6 +215,11 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_audio_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_audio_persistence.py` | `test_multiple_authenticated_users_audio_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
 | `test_audio_persistence.py` | `test_authentic_audio_prediction_mapping` | Authentic audio prediction mapping | **PASSED** | Correctly maps non-synthetic audio to prediction 'AUTHENTIC' |
+| `test_audio_persistence.py` | `test_corrupt_audio_persists_no_scan` | Corrupt WAV persistence invariant | **PASSED** | Corrupt bytes return 400 `PROCESSING_ERROR`, 0 scans in DB |
+| `test_audio_persistence.py` | `test_empty_audio_persists_no_scan` | Empty WAV persistence invariant | **PASSED** | Empty bytes return 400 `PROCESSING_ERROR`, 0 scans in DB |
+| `test_audio_persistence.py` | `test_unsupported_audio_formats_persist_no_scan` | Unsupported formats persistence guard | **PASSED** | MP3/M4A/FLAC return 400 `INVALID_FORMAT`, 0 scans in DB |
+| `test_audio_persistence.py` | `test_decoder_failure_persists_no_scan` | Decoder failure persistence guard | **PASSED** | wavfile.read failure returns 400, 0 scans in DB |
+| `test_audio_persistence.py` | `test_zero_samples_audio_persists_no_scan` | Zero samples buffer guard | **PASSED** | Zero sample buffer returns 400, 0 scans in DB |
 | `test_scan_history.py` | `test_authenticated_empty_history` | Authenticated empty history | **PASSED** | Empty list returned with correct pagination metadata |
 | `test_scan_history.py` | `test_authenticated_history_retrieval_and_ordering` | History retrieval & ordering | **PASSED** | Newest-first ordering, 5 scans retrieved with correct metadata |
 | `test_scan_history.py` | `test_pagination_navigation` | Pagination navigation | **PASSED** | page 1 and page 2 sliced accurately with correct `has_next`/`has_prev` |
@@ -232,7 +246,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 ## 2. Live HTTP Server Verification Tests
 
 - **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
-- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`, `scratch/verify_live_image_hardening.py`, `scratch/verify_live_video_hardening.py`)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`, `scratch/verify_live_image_hardening.py`, `scratch/verify_live_video_hardening.py`, `scratch/verify_live_audio_hardening.py`)
 - **Result Summary**: All live verification checks passed
 
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
@@ -260,6 +274,11 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/audio` | POST | Multipart (`test.wav`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Corrupt WAV, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Empty WAV, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Unsupported .mp3/.m4a/.flac, Bearer token)| 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Decoder failure mock, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Temp audio file removal lifecycle) | 200 | 200 | True | **PASSED** |
 | `/api/report/abuse` | POST | JSON (YouTube target) | 201 | 201 | True | **PASSED** |
 | `/api/report/abuse` | POST | JSON (TikTok target) | 400 | 400 | False | **PASSED** |
 | `/api/not-a-real-endpoint` | GET | None | 404 | 404 | False | **PASSED** |

@@ -152,4 +152,37 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
 - **Status**:
   Fixed.
 
+---
+
+## Bug 8: Synthetic Noise Fallback on Audio Decode Failure and Fabricated Forensic Results (SEC-03)
+
+- **Problem**:
+  In `AudioDetectionService.analyze_audio()`, when `scipy.io.wavfile.read()` failed to decode an audio file (due to corrupt binary bytes, unsupported containers, or truncated content), the exception was caught and synthetic Gaussian noise was silently generated:
+  ```python
+  sample_rate = 16000
+  data = np.random.normal(0, 0.1, 16000 * 3)
+  ```
+  This synthetic waveform was processed as if it were authentic audio from the user upload, calculating arbitrary Zero Crossing Rates, energy variances, confidence scores, and synthetic/authentic verdicts. The fabricated result was then persisted into the database as a genuine `Scan` and `ScanResult` record. In a forensic verification platform, persisting fabricated results for corrupt or unreadable files undermines platform integrity and evidentiary credibility.
+- **Cause**:
+  1. An artificial mock fallback in `analyze_audio` that caught all decoding exceptions and synthesized random noise rather than propagating an error.
+  2. `ALLOWED_AUDIO_EXTENSIONS` allowed `mp3`, `m4a`, and `flac` despite `scipy.io.wavfile.read` having no support for non-WAV containers, forcing non-WAV uploads directly into the synthetic fallback path.
+  3. Missing decoded buffer checks for empty/zero-sample arrays or non-positive sample rates.
+- **Location**:
+  `backend/services/audio_service.py`
+  `backend/utils/file_validator.py`
+- **Fix**:
+  1. Completely removed the synthetic noise fallback. If `scipy.io.wavfile.read()` raises an exception, the service logs a warning and raises `ValueError("Failed to decode audio file. File might be corrupted or in an unsupported format.")`.
+  2. Added explicit buffer checks: raises `ValueError("Uploaded audio contains zero readable audio samples.")` if `data.size == 0`, and `ValueError("Uploaded audio has an invalid sample rate.")` if `sample_rate <= 0`.
+  3. Adopted Option A (WAV-only policy): updated `ALLOWED_AUDIO_EXTENSIONS = {"wav"}` in `backend/utils/file_validator.py` so unsupported formats fail fast with HTTP 400 `INVALID_FORMAT`.
+  4. Added deterministic temporary file cleanup in `finally:` with warning logging if `os.remove(temp_path)` encounters an `OSError`.
+  5. Ensured zero-scan persistence: `audio_routes.py` catches `ValueError`, returning HTTP 400 `PROCESSING_ERROR` before `ScanService.create_scan` is called, ensuring 0 `Scan` and 0 `ScanResult` records are created.
+- **Verification**:
+  - `tests/test_audio_detection.py`: verified corrupt WAV returns 400, empty WAV returns 400, non-WAV returns 400, synthetic noise generator is never invoked, buffer bounds work, and temp files are deleted on success and failure (17 passed).
+  - `tests/test_audio_persistence.py`: verified corrupt, empty, unsupported, and failing audio files create 0 scans and 0 scan results in the database (18 passed).
+  - `scratch/verify_live_audio_hardening.py`: end-to-end live verification passed across all rejection and persistence scenarios.
+  - Full regression test suite: 234 tests passed.
+- **Status**:
+  Fixed.
+
+
 

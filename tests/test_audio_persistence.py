@@ -13,6 +13,7 @@ Verifies that POST /api/detect/audio:
 import io
 import os
 import time
+import numpy as np
 import pytest
 import jwt
 from unittest.mock import patch
@@ -564,3 +565,126 @@ def test_authentic_audio_persists_authentic_prediction(client, app, auth_headers
         assert scan.result.confidence == 0.28
         assert scan.result.risk_level == "LOW"
         assert scan.result.result_data["is_synthetic_audio"] is False
+
+
+# ===========================================================================
+# 12. Phase 5 Step 4: Audio Decoding and Integrity Rejection Invariants
+# ===========================================================================
+
+def test_corrupt_audio_persists_no_scan(client, app, auth_headers_a):
+    """
+    12.1. Corrupt WAV byte stream:
+        - Uploading invalid bytes named 'corrupt.wav' fails with HTTP 400.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"audio": (io.BytesIO(b"RIFF\x00\x00\x00\x00WAVEcorrupt_bytes"), "corrupt.wav")}
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+def test_empty_audio_persists_no_scan(client, app, auth_headers_a):
+    """
+    12.2. Empty WAV upload:
+        - Uploading 0 bytes named 'empty.wav' fails with HTTP 400.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"audio": (io.BytesIO(b""), "empty.wav")}
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+@pytest.mark.parametrize("ext", ["mp3", "m4a", "flac"])
+def test_unsupported_audio_formats_persist_no_scan(client, app, auth_headers_a, ext):
+    """
+    12.3. Unsupported audio extensions (MP3/M4A/FLAC):
+        - Fails fast with HTTP 400 INVALID_FORMAT.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"audio": (io.BytesIO(b"dummy audio data"), f"evidence.{ext}")}
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+def test_decoder_failure_persists_no_scan(client, app, real_audio_path, auth_headers_a):
+    """
+    12.4. wavfile.read() decoder failure:
+        - When wavfile.read raises an exception, the request fails with HTTP 400.
+        - No synthetic fallback occurs and Scan count == 0, ScanResult count == 0.
+    """
+    with patch("scipy.io.wavfile.read", side_effect=ValueError("Header truncated")):
+        with open(real_audio_path, "rb") as aud_file:
+            response = client.post(
+                "/api/detect/audio",
+                data={"audio": (aud_file, "failing_decoder.wav")},
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+def test_zero_samples_audio_persists_no_scan(client, app, auth_headers_a):
+    """
+    12.5. Zero readable samples buffer:
+        - Decoded buffer with size 0 fails with HTTP 400.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    with patch("scipy.io.wavfile.read", return_value=(16000, np.array([], dtype=np.float32))):
+        response = client.post(
+            "/api/detect/audio",
+            data={"audio": (io.BytesIO(b"dummy"), "zero_samples.wav")},
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+

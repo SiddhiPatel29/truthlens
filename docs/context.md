@@ -148,12 +148,20 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Enforced maximum video duration limit (`MAX_VIDEO_DURATION_SECONDS = 120`). Videos exceeding 120s are rejected with HTTP 400 `PROCESSING_ERROR` and persist zero scans.
    - Enforced dual-layer video resolution bounds (`MAX_VIDEO_WIDTH = 4096`, `MAX_VIDEO_HEIGHT = 4096`, `MAX_VIDEO_PIXELS = 16_777_216`) on container metadata before frame sampling and on actual decoded frames (`frame.shape[:2]`) during sampling, rejecting oversized videos before expensive processing.
    - Added 16 new automated tests (13 in `tests/test_video_detection.py`, 3 in `tests/test_video_persistence.py`).
-   - Total test suite expanded to **214 passed tests in 44.17s**.
+4. **Audio Decoding & Format Integrity Hardening (Step 4)**:
+   - Eliminated the dangerous synthetic Gaussian noise fallback (`np.random.normal`) in `AudioDetectionService.analyze_audio()`, ensuring that unreadable or corrupt audio files are cleanly rejected rather than receiving fabricated forensic verdicts persisted into the database.
+   - Decoders that fail raise `ValueError("Failed to decode audio file. File might be corrupted or in an unsupported format.")`, which is translated to HTTP 400 `PROCESSING_ERROR` without leaking internal tracebacks.
+   - Validated decoded audio buffer against zero-sample arrays (`data.size == 0`) and invalid sample rates (`sample_rate <= 0`).
+   - Adopted Option A (Preferred): restricted `ALLOWED_AUDIO_EXTENSIONS` strictly to `{"wav"}` in `backend/utils/file_validator.py` because `scipy.io.wavfile.read()` is the active decoder and natively only supports WAV containers. Unsupported formats (`.mp3`, `.m4a`, `.flac`) fail fast with HTTP 400 `INVALID_FORMAT`.
+   - Enforced deterministic temporary audio file cleanup in a `finally:` block with warning logging on `OSError`.
+   - Enforced the persistence invariant: every rejected audio upload creates exactly 0 `Scan` and 0 `ScanResult` database records.
+   - Added 20 new automated tests (10 in `tests/test_audio_detection.py`, 10 in `tests/test_audio_persistence.py`).
+   - Total test suite expanded to **234 passed tests in 51.27s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 5 Step 3 (Video Temp File Cleanup + Video Resource Limits) is complete and verified with 214/214 tests passing and live in-process verification passed. Ready for user commit.
+- Phase 5 Step 4 (Audio Decoding & Format Integrity Hardening) is complete and verified with 234/234 tests passing and live in-process verification passed. Ready for user commit.
 
 ---
 
@@ -173,6 +181,7 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **User-Scoped Scan History & Anti-IDOR 404**: `GET /api/scans` and `GET /api/scans/<id>` strictly filter by `user_id == g.current_user_id`; unowned scans return 404; list payloads exclude heavy `result_data`.
 - **Image Decompression Bomb & Resource Protection**: Rejects images exceeding 4096x4096px or 16MP before memory-intensive convolutions; downscales previews to 512px thumbnails.
 - **Video Resource Bounds & Deterministic Windows Cleanup**: Enforces duration limits (120s), resolution bounds (4096x4096px / 16MP), and guarantees `cap.release()` before `os.remove(temp_path)` in `finally:`, eliminating Windows file handle lock leaks (`WinError 32`).
+- **Audio Integrity & Elimination of Fabricated Forensics**: Replaces synthetic Gaussian noise fallbacks with clean `ValueError` propagation; adopts Option A WAV-only policy for `scipy.io.wavfile.read()`; validates buffer sample size and rate; enforces deterministic tempfile deletion; guarantees 0 scans persisted on rejected uploads.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
@@ -180,17 +189,17 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 ## 5. Known Limitations & Remaining Problems
 1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
-3. **Audio Decoding Reliability**: `audio_service.py` uses `scipy.io.wavfile` and synthetic noise fallback; needs format integrity hardening (scheduled for Phase 5 Step 4).
-4. **Basic File Validation**: Media validation inspects extensions; binary magic-byte inspection belongs to future security hardening (Phase 5 Step 5).
+3. **Audio Format Scope (WAV-Only)**: Audio detection currently supports uncompressed WAV containers decoded via `scipy.io.wavfile.read()`. Support for compressed formats (MP3/M4A/FLAC/AAC) is deferred until a dedicated transcoding/decoding pipeline (e.g. via ffmpeg or PyAV) is introduced.
+4. **Basic Extension File Validation**: Media validation currently inspects file extensions; binary magic-byte / MIME-type inspection belongs to Phase 5 Step 5.
 5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
 6. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
 ## 6. Recommended Next Backend Task
-Proceed to **Phase 5 Step 4: Audio Decoding Integrity & Synthetic Fallback Hardening**:
-1. Hardens audio ingestion against malformed WAV headers and unhandled decoding exceptions.
-2. Eliminates synthetic noise fallbacks that obscure malformed media.
+Proceed to **Phase 5 Step 5: Magic-Byte & Header Ingestion Validation Hardening**:
+1. Inspect file signatures / magic bytes (e.g. PNG `\x89PNG\r\n\x1a\n`, JPEG `\xff\xd8\xff`, RIFF `RIFF....WAVE`, MP4 `ftyp`) at the validation layer before passing streams to decoders.
+2. Prevent extension spoofing (e.g., an executable or text script renamed to `.wav` or `.jpg`).
 
 
 

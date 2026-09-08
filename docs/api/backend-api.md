@@ -429,13 +429,13 @@ None.
   - `Content-Type: multipart/form-data`
   - `Authorization: Bearer <token>`
 - **Request Body**:
-  - `audio` (binary file): Supported formats: `.wav`, `.mp3`, `.m4a`, `.flac`.
+  - `audio` (binary file): Supported format: `.wav` (Option A: WAV-only policy for active `scipy.io.wavfile` decoder).
 
 ### Validation Rules
 1. Request must contain a valid Bearer JWT in the `Authorization` header.
 2. Request must be `multipart/form-data` with form field name `audio`.
 3. File must be present and filename non-empty.
-4. Extension must be in `{"wav", "mp3", "m4a", "flac"}`.
+4. Extension must be in `{"wav"}`.
 5. Max payload size: 50 MB.
 
 ### Success Response (`200 OK`)
@@ -516,9 +516,27 @@ None.
   ```json
   {
     "success": false,
-    "message": "Invalid audio format. Allowed: flac, m4a, mp3, wav",
+    "message": "Invalid audio format. Allowed: wav",
     "data": null,
     "error_code": "INVALID_FORMAT"
+  }
+  ```
+- **Unreadable / corrupted / empty audio stream (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Failed to decode audio file. File might be corrupted or in an unsupported format.",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Zero readable audio samples (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Uploaded audio contains zero readable audio samples.",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
   }
   ```
 - **Persistence Failure (`500 Internal Server Error`)**:

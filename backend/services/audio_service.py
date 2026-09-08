@@ -4,8 +4,11 @@ Inspects acoustic wave characteristics and calculates synchronization metrics.
 """
 import os
 import tempfile
+import logging
 import numpy as np
 from scipy.io import wavfile
+
+logger = logging.getLogger(__name__)
 
 class AudioDetectionService:
     @staticmethod
@@ -19,23 +22,30 @@ class AudioDetectionService:
             with os.fdopen(temp_fd, "wb") as f:
                 file_storage.save(f)
 
-            # Read WAV file
+            # Read WAV file with error propagation (no synthetic noise fallback)
             try:
                 sample_rate, data = wavfile.read(temp_path)
-            except Exception:
-                # Fallback for synthetic/headerless buffers
-                sample_rate = 16000
-                data = np.random.normal(0, 0.1, 16000 * 3)
+            except Exception as e:
+                logger.warning("Audio decoding failed for uploaded file: %s", str(e))
+                raise ValueError("Failed to decode audio file. File might be corrupted or in an unsupported format.") from None
+
+            # Validate decoded audio buffer
+            if data is None or (isinstance(data, np.ndarray) and data.size == 0) or len(data) == 0:
+                raise ValueError("Uploaded audio contains zero readable audio samples.")
+
+            if sample_rate <= 0:
+                raise ValueError("Uploaded audio has an invalid sample rate.")
 
             # Convert stereo to mono if necessary
             if len(data.shape) > 1:
                 data = data.mean(axis=1)
 
             data = data.astype(np.float32)
-            if np.max(np.abs(data)) > 0:
-                data = data / np.max(np.abs(data))
+            max_val = np.max(np.abs(data)) if len(data) > 0 else 0.0
+            if max_val > 0:
+                data = data / max_val
 
-            duration_sec = round(len(data) / float(sample_rate), 2) if sample_rate > 0 else 0.0
+            duration_sec = round(len(data) / float(sample_rate), 2)
 
             # 1. Zero Crossing Rate (ZCR) - detects synthetic noise floors
             zero_crossings = np.sum(np.diff(data > 0) != 0)
@@ -66,7 +76,7 @@ class AudioDetectionService:
                 "confidence_score": confidence_score,
                 "metrics": {
                     "duration_seconds": duration_sec,
-                    "sample_rate_hz": sample_rate,
+                    "sample_rate_hz": int(sample_rate),
                     "zero_crossing_rate": round(zcr, 4),
                     "energy_variance": round(energy_variance, 4)
                 },
@@ -77,5 +87,5 @@ class AudioDetectionService:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.warning("Failed to remove temporary audio file %s: %s", temp_path, str(e))
