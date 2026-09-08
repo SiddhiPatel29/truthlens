@@ -393,17 +393,21 @@ None.
 
 - **Method**: `POST`
 - **Path**: `/api/detect/audio`
-- **Authentication**: None (Public in Phase 1)
-- **Service Called**: `AudioDetectionService.analyze_audio`
-- **Request Headers**: `Content-Type: multipart/form-data`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Services Called**: `AudioDetectionService.analyze_audio`, `ScanService.create_scan`, `ScanService.save_scan_result`
+- **Persistence**: Persists a `Scan` (modality `audio`, `filename` set to uploaded filename, owned by authenticated user) in `PENDING` status, followed by an atomic commit of a `ScanResult` (`COMPLETED` status, timestamp, calculated `prediction` `SYNTHETIC` or `AUTHENTIC`, `confidence`, and `risk_level`). Raw audio bytes are NOT stored in the database.
+- **Request Headers**:
+  - `Content-Type: multipart/form-data`
+  - `Authorization: Bearer <token>`
 - **Request Body**:
   - `audio` (binary file): Supported formats: `.wav`, `.mp3`, `.m4a`, `.flac`.
 
 ### Validation Rules
-1. Form field name must be `audio`.
-2. File must be present and non-empty.
-3. Extension must be in `{"wav", "mp3", "m4a", "flac"}`.
-4. Max payload size: 50 MB.
+1. Request must contain a valid Bearer JWT in the `Authorization` header.
+2. Request must be `multipart/form-data` with form field name `audio`.
+3. File must be present and filename non-empty.
+4. Extension must be in `{"wav", "mp3", "m4a", "flac"}`.
+5. Max payload size: 50 MB.
 
 ### Success Response (`200 OK`)
 ```json
@@ -434,6 +438,33 @@ None.
 ```
 
 ### Error Responses
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
 - **Missing `audio` field (`400 Bad Request`)**:
   ```json
   {
@@ -443,6 +474,15 @@ None.
     "error_code": "MISSING_FILE"
   }
   ```
+- **Empty file (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "No audio file selected.",
+    "data": null,
+    "error_code": "INVALID_FILE"
+  }
+  ```
 - **Unsupported format (`400 Bad Request`)**:
   ```json
   {
@@ -450,6 +490,15 @@ None.
     "message": "Invalid audio format. Allowed: flac, m4a, mp3, wav",
     "data": null,
     "error_code": "INVALID_FORMAT"
+  }
+  ```
+- **Persistence Failure (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while persisting the scan results.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
   }
   ```
 

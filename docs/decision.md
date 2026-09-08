@@ -469,8 +469,44 @@ Connect `POST /api/detect/video` to `@require_auth` and `ScanService`, persistin
 4. **Service Boundary & Orphan-Scan Consideration**:
    `ScanService.create_scan` and `ScanService.save_scan_result` are discrete transactional operations. The route treats `ScanService` as the persistence boundary without touching `db.session`. If `save_scan_result` fails after `create_scan` succeeds, the parent scan remains in `PENDING` status. This temporary behavior represents an incomplete scan without introducing complex distributed rollback mechanisms before asynchronous job processing is formally introduced.
 
-5. **Isolation of Audio and Abuse Modalities**:
-   Audio detection and abuse dispatch routes remain public and untouched, preserving feature-by-feature progression.
+## Decision 22: Audio Detection Scan Persistence & Route Authorization (Phase 4 Step 5)
+
+### Decision
+Connect `POST /api/detect/audio` to `@require_auth` and `ScanService`, persisting the audio scan and its forensic results with user ownership and uploaded filename metadata, while preserving the API response envelope, multipart file validation rules, and detector output structures. Abuse reporting remains public and unpersisted in this step.
+
+### Reasons & Architectural Principles
+
+1. **Why `POST /api/detect/audio` Now Requires Authentication (`@require_auth`)**:
+   Audio processing involves signal decoding (`scipy.io.wavfile`), Zero Crossing Rate (ZCR) calculations, spectral energy variance analysis, and lip-sync desynchronization evaluation. Requiring Bearer JWT authentication upfront protects backend resources from unauthenticated abuse, enforces user ownership on all persisted scans (`Scan.user_id = g.current_user_id`), and fails fast with HTTP 401 (`AUTHENTICATION_REQUIRED`, `INVALID_TOKEN`, `TOKEN_EXPIRED`) before reading audio bytes or executing signal processing algorithms.
+
+2. **Capturing Media Filename Metadata**:
+   The uploaded file is received via `request.files['audio']`. The original uploaded filename (`file.filename`) is passed directly to `ScanService.create_scan(filename=...)`, allowing users to trace audio scan records back to their original source files.
+
+3. **Detector Output Mapping & Raw Binary Exclusion**:
+   `AudioDetectionService.analyze_audio` computes acoustic anomaly metrics and flags temporal lip-sync discrepancy windows.
+   The route deliberately constructs `result_data`:
+   - `prediction`: `"SYNTHETIC"` if `is_synthetic_audio` is True, else `"AUTHENTIC"` (accurately reflecting synthetic voice classification semantics).
+   - `confidence`: `float(result.get("confidence_score", 0.0))`.
+   - `risk_level`: Evaluated against acoustic anomaly score semantics:
+     - `confidence_score` represents acoustic manipulation probability in `[0.12, 0.97]` where `is_synthetic_audio = confidence_score > 0.65`.
+     - The established application risk mapping (`HIGH >= 0.7`, `MEDIUM >= 0.4`, `LOW < 0.4`) aligns with these acoustic anomaly semantics.
+   - `result_data`: Deliberately constructed dictionary containing:
+     ```python
+     {
+         "is_synthetic_audio": result.get("is_synthetic_audio"),
+         "confidence_score": confidence,
+         "metrics": result.get("metrics"),
+         "lip_sync_discrepancies": result.get("lip_sync_discrepancies", []),
+     }
+     ```
+   - **Critical Storage Rule**: Raw uploaded audio binary streams, raw PCM samples, and transient numpy arrays are NEVER stored in the database. Only structured acoustic metrics and discrepancy windows are persisted.
+
+4. **Service Boundary & Orphan-Scan Consideration**:
+   `ScanService.create_scan` and `ScanService.save_scan_result` are discrete transactional operations. The route treats `ScanService` as the persistence boundary without touching `db.session`. If `save_scan_result` fails after `create_scan` succeeds, the parent scan remains in `PENDING` status. This temporary behavior represents an incomplete scan without premature compensation complexity before asynchronous job queues are formally introduced.
+
+5. **Completion of All Four Forensic Modalities**:
+   With Phase 4 Step 5 complete, all four multimodal forensic detection pipelines (text, image, video, and audio) now consistently require JWT authentication and persist structured scan records and forensic results via `ScanService`. Only abuse reporting remains unpersisted at this stage.
+
 
 
 

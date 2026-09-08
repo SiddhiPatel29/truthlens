@@ -284,6 +284,53 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 147 passed out of 147 tests in 13.34s.
 - **Current Status**: Complete.
 
+---
+
+## 16. Video Detection Scan Persistence (Phase 4 Step 4)
+- **Status**: Completed (Phase 4 Step 4).
+- **Reason**: Connect the existing video detection endpoint to authentication and scan persistence so that analyzed video scans are recorded, associated with the authenticated user, and transitioned to `COMPLETED` status with uploaded filename metadata.
+- **Files Changed / Created**:
+  - `backend/routes/video_routes.py` (Modified - protected with `@require_auth`, calls `ScanService.create_scan` with `filename=file.filename` and `ScanService.save_scan_result`, handles `ScanServiceError` cleanly)
+  - `tests/test_video_detection.py` (Modified - updated regression tests with authentication fixtures and headers)
+  - `tests/test_video_persistence.py` (New - 12 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Guards `POST /api/detect/video`, ensuring unauthenticated requests are rejected with standardized 401 responses before saving temporary disk files or running frame analyses.
+  - Forensic Mapping: Maps detector outputs (`is_deepfake`, `confidence_score`, `metrics`, `keyframe_heatmap_preview`) into `prediction` (`DEEPFAKE` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and `result_data` JSON.
+  - Media Metadata: Records original uploaded filename in `Scan.filename`.
+  - Exclusion of Raw Binary Bytes: Heavy uploaded video files, frames, and numpy arrays are not stored in the database.
+  - Scan Lifecycle: Scan is created in `PENDING` status (`user_id=g.current_user_id`, `media_type="video"`, `filename=file.filename`), then updated atomically to `COMPLETED` with timestamp upon `save_scan_result()`.
+  - Failure Handling: Catches `ScanServiceError` and logs server-side without leaking raw SQL or database errors, returning sanitized HTTP 500.
+  - Preservation: Response envelope and detector data output remain completely backward-compatible. Audio and abuse routes remained unchanged in this step.
+- **Tests**:
+  - `tests/test_video_persistence.py` (12 tests passed in 4.54s).
+  - `tests/test_video_detection.py` (5 tests passed).
+  - Complete test suite: 159 passed out of 159 tests.
+- **Current Status**: Complete.
+
+---
+
+## 17. Audio Detection Scan Persistence (Phase 4 Step 5)
+- **Status**: Completed (Phase 4 Step 5).
+- **Reason**: Connect the existing audio detection endpoint to authentication and scan persistence so that analyzed audio scans are recorded, associated with the authenticated user, and transitioned to `COMPLETED` status with uploaded filename metadata.
+- **Files Changed / Created**:
+  - `backend/routes/audio_routes.py` (Modified - protected with `@require_auth`, calls `ScanService.create_scan` with `filename=file.filename` and `ScanService.save_scan_result`, handles `ScanServiceError` cleanly)
+  - `tests/test_audio_detection.py` (Modified - updated regression tests with authentication fixtures and headers)
+  - `tests/test_audio_persistence.py` (New - 11 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Guards `POST /api/detect/audio`, ensuring unauthenticated requests are rejected with standardized 401 responses before running audio decoding or acoustic analysis.
+  - Forensic Mapping: Maps detector outputs (`is_synthetic_audio`, `confidence_score`, `metrics`, `lip_sync_discrepancies`) into `prediction` (`SYNTHETIC` or `AUTHENTIC`), `confidence`, `risk_level` (`HIGH`, `MEDIUM`, `LOW`), and `result_data` JSON.
+  - Media Metadata: Records original uploaded filename in `Scan.filename`.
+  - Exclusion of Raw Binary Bytes: Heavy uploaded audio files, raw PCM samples, and numpy arrays are not stored in the database.
+  - Scan Lifecycle: Scan is created in `PENDING` status (`user_id=g.current_user_id`, `media_type="audio"`, `filename=file.filename`), then updated atomically to `COMPLETED` with timestamp upon `save_scan_result()`.
+  - Failure Handling: Catches `ScanServiceError` and logs server-side without leaking raw SQL or database errors, returning sanitized HTTP 500.
+  - Preservation: Response envelope and detector data output remain completely backward-compatible. All 4 forensic modalities (text, image, video, audio) are now authenticated and persisted.
+- **Tests**:
+  - `tests/test_audio_persistence.py` (11 tests passed in 4.67s).
+  - `tests/test_audio_detection.py` (4 tests passed).
+  - Complete test suite: 170 passed out of 170 tests in 24.75s.
+- **Current Status**: Complete.
+
+
 
 
 

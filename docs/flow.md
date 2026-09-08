@@ -270,12 +270,23 @@ Client receives HTTP 200 JSON Response
 
 ```
 Client HTTP Request: POST /api/detect/audio
-Headers: Content-Type: multipart/form-data
+Headers:
+  Content-Type: multipart/form-data
+  Authorization: Bearer <access_token>
 Body: file field 'audio' containing audio binary (e.g. test.wav)
   │
   ▼
 [backend/app.py: create_app]
-  Routes to audio_bp
+  Flask WSGI router matches prefix '/api' and routes to audio_bp
+  │
+  ▼
+[backend/utils/auth.py: @require_auth]
+  1. Inspects request.headers.get("Authorization")
+     - Missing or non-Bearer: returns 401 AUTHENTICATION_REQUIRED
+  2. Extracts token and calls AuthService.verify_token(token)
+     - Expired: returns 401 TOKEN_EXPIRED
+     - Invalid signature/claims: returns 401 INVALID_TOKEN
+  3. Validates positive integer sub claim and binds g.current_user_id = user_id
   │
   ▼
 [backend/routes/audio_routes.py: detect_audio()]
@@ -301,7 +312,24 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
 [backend/routes/audio_routes.py: detect_audio()]
   Catches ValueError -> returns api_response(False, str(e), None, "PROCESSING_ERROR", 400)
   Catches Exception  -> logs traceback via logger.exception(), returns sanitized 500 error
-  On success:
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.create_scan()]
+  1. Validates user_id=g.current_user_id, media_type="audio", filename=file.filename
+  2. Inserts Scan record with status="PENDING" and created_at=utc_now()
+  3. Commits transaction and returns scan instance
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.save_scan_result()]
+  1. Maps detector output:
+     - prediction = "SYNTHETIC" if is_synthetic_audio else "AUTHENTIC"
+     - confidence = confidence_score
+     - risk_level = "HIGH" if confidence >= 0.7 else ("MEDIUM" if confidence >= 0.4 else "LOW")
+     - result_data = deliberately constructed dictionary (metrics + lip_sync_discrepancies; no raw audio bytes)
+  2. Inserts ScanResult record linked to scan.id
+  3. Atomically updates parent scan status="COMPLETED", completed_at=utc_now()
+  4. Commits atomic transaction
+  (If persistence fails: route catches ScanServiceError, logs exception, returns 500 INTERNAL_SERVER_ERROR)
   │
   ▼
 [backend/utils/response.py: api_response()]
