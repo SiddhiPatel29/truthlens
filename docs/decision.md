@@ -562,6 +562,34 @@ Enforce strict image dimension and pixel limits (`MAX_IMAGE_WIDTH = 4096`, `MAX_
 5. **Security vs. Legitimate High-Resolution Tradeoff**:
    A ceiling of $4096 \times 4096$ pixels (16 Megapixels) comfortably supports standard consumer and smartphone photography while neutralizing malicious gigapixel decompression bombs.
 
+---
+
+## Decision 25: Video Temporary File Cleanup Ordering, Windows File Handle Lock Mitigation, and Video Resource Bounds (Phase 5 Step 3)
+
+### Decision
+1. Restructure the temporary file and `cv2.VideoCapture` lifecycle in `VideoDetectionService.analyze_video` within a strict `try...finally` block such that `cap.release()` is deterministically executed **before** `os.remove(temp_path)` on all execution paths (success, invalid/corrupt stream, zero readable frames, limit violations, and unexpected exceptions).
+2. Replace the hardcoded `.mp4` temporary file suffix with a dynamically derived extension matching the validated upload extension (`.mp4`, `.mov`, `.avi`, `.mkv`), safely defaulting to `.mp4`.
+3. Enforce a video duration limit (`MAX_VIDEO_DURATION_SECONDS = 120`). If container metadata indicates duration exceeds 120s, reject immediately with HTTP 400 (`PROCESSING_ERROR`) without creating or persisting a `Scan` record.
+4. Enforce video resolution bounds (`MAX_VIDEO_WIDTH = 4096`, `MAX_VIDEO_HEIGHT = 4096`, `MAX_VIDEO_PIXELS = 16_777_216`). Inspect container metadata (`cv2.CAP_PROP_FRAME_WIDTH`, `cv2.CAP_PROP_FRAME_HEIGHT`) first to reject oversized videos before sampling. Validate actual decoded frame dimensions (`frame.shape[:2]`) immediately upon reading each frame, rejecting oversized frames before any costly processing or array allocations.
+
+### Reasons & Architectural Principles
+
+1. **Why VideoCapture Handle Release Must Precede `os.remove()` (Windows Lock Mechanics)**:
+   On Windows operating systems, opening a file with `cv2.VideoCapture` places an exclusive OS-level handle lock on the underlying filesystem node. If an exception occurs (e.g. `total_frames <= 0`, corrupt stream, or limit violation) and `os.remove(temp_path)` is attempted while `cap` remains unreleased, Windows raises `PermissionError: [WinError 32] The process cannot access the file because it is being used by another process`. Previously, `cap.release()` was located inside the `try` block after frame analysis, and `os.remove` caught and silently discarded `OSError`. Consequently, failed video scans left 50 MB temporary video files permanently orphaned on the server disk, creating a direct vector for disk exhaustion denial-of-service. Placing `cap.release()` inside `finally:` directly before `os.remove()` guarantees file release prior to deletion across all scenarios.
+
+2. **Why Duration Limits Are Enforced**:
+   Video deepfake analysis extracts multiple temporal frames across the video timeline and computes frame-level Laplacian variances and temporal instability metrics. Long videos (e.g. 10 minutes to several hours) place substantial sustained CPU and I/O load on the backend, increasing processing latency and holding server worker threads. Capping duration at 120 seconds bounds processing overhead while accommodating forensic short-form clips, social media uploads, and synthetic snippet verifications.
+
+3. **Why Dual-Layer Resolution Checks (Metadata + Decoded Frame) Are Critical**:
+   Container-level metadata (such as MP4 headers) may report nominal dimensions (e.g. 640x480) or be missing/corrupt, while the underlying video track contains 4K/8K raster streams. Conversely, a video with accurate 8K metadata should be rejected immediately without allocating frame decoders. Checking metadata first rejects obvious violations at zero compute cost. Validating `frame.shape[:2]` immediately upon decoding each frame guarantees that no frame exceeding 4096x4096 (16 MP) is ever passed to texture analysis or Grad-CAM++ mask generation.
+
+4. **Zero-Scan Persistence Invariant on Rejection**:
+   Consistent with the media persistence architecture, `ScanService.create_scan()` is invoked only *after* detection completes successfully. A video rejected for duration or resolution limits raises `ValueError`, returning HTTP 400 `PROCESSING_ERROR` to the client while leaving the database completely clean.
+
+5. **Detection Algorithm Semantics Preserved**:
+   Frame sampling count (16), uniform linspace sampling, Laplacian variance calculations, anomaly score heuristics, temporal instability std-dev, 0.65 deepfake threshold, risk level mappings, and response envelopes remain 100% identical.
+
+
 
 
 

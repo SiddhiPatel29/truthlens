@@ -116,3 +116,40 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
 - **Status**:
   Fixed.
 
+---
+
+## Bug 7: Windows Video Temporary File Lock Leak and Unbounded Resource Consumption (SEC-02)
+
+- **Problem**:
+  When video processing encountered an error (corrupt video stream, zero readable frames, unhandled processing exception, or duration/resolution violation), the temporary video file created on disk was never deleted on Windows systems. The server disk steadily accumulated orphaned temporary video files (up to 50 MB each), leading to eventual disk exhaustion and server denial-of-service. Additionally, there were no constraints on video duration or decoded frame dimensions.
+- **Cause**:
+  1. `cap.release()` was located inside the `try` block after frame analysis. If any exception occurred before that point, `cap.release()` never executed.
+  2. The `finally` block attempted `os.remove(temp_path)` while the `cv2.VideoCapture` object still held an exclusive OS file handle on Windows. On Windows, attempting to delete an open file raises `PermissionError: [WinError 32] The process cannot access the file because it is being used by another process`.
+  3. The `except OSError: pass` block in `finally` silently swallowed this `PermissionError`, hiding the failure and permanently orphaning the file.
+  4. Absence of video duration and frame dimension limits permitted processing of arbitrarily long or massive video files.
+- **Location**:
+  `backend/services/video_service.py`
+- **Fix**:
+  1. Restructured `analyze_video` with a deterministic `finally` cleanup:
+     ```python
+     finally:
+         if cap is not None:
+             try:
+                 cap.release()
+             except Exception as e:
+                 logger.warning("Error releasing VideoCapture handle: %s", str(e))
+         if os.path.exists(temp_path):
+             try:
+                 os.remove(temp_path)
+             except OSError as e:
+                 logger.warning("Failed to remove temporary video file %s: %s", temp_path, str(e))
+     ```
+  2. Dynamically derived the temporary file suffix (`.mp4`, `.mov`, `.avi`, `.mkv`) based on the validated extension.
+  3. Introduced `MAX_VIDEO_DURATION_SECONDS = 120`. Rejects videos exceeding 120s with HTTP 400 `PROCESSING_ERROR` and persists zero scans.
+  4. Introduced `MAX_VIDEO_WIDTH = 4096`, `MAX_VIDEO_HEIGHT = 4096`, `MAX_VIDEO_PIXELS = 16_777_216`. Checked container metadata first and validated actual decoded frame dimensions upon reading each frame.
+- **Verification**:
+  Automated tests in `tests/test_video_detection.py` and `tests/test_video_persistence.py` verify that `cap.release()` executes before `os.remove()`, temporary files are cleaned up on success and failure, oversized durations and resolutions return 400 `PROCESSING_ERROR`, and zero scans are created. Live verification via `scratch/verify_live_video_hardening.py` confirmed clean temp directory and proper rejection.
+- **Status**:
+  Fixed.
+
+

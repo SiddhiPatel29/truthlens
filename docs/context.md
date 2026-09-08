@@ -142,11 +142,18 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Slashed database `ScanResult.result_data` JSON payload sizes by over 90% for high-resolution images while preserving visual Grad-CAM++ diagnostic utility and full API contract compatibility.
    - Expanded test suite with 8 new tests across `tests/test_image_detection.py` and `tests/test_image_persistence.py`.
    - Total test suite expanded to **198 passed tests in 25.21s**.
+3. **Video Temp File Cleanup & Video Resource Limits (Step 3)**:
+   - Restructured the temporary file and `cv2.VideoCapture` lifecycle in `VideoDetectionService.analyze_video` within a deterministic `try...finally` block guaranteeing `cap.release()` executes **before** `os.remove(temp_path)` on all paths (success, invalid stream, zero frames, limit violation, and unexpected exceptions). This eliminates Windows file handle lock leaks (`PermissionError [WinError 32]`) that previously left 50 MB orphaned files on disk.
+   - Dynamically derived tempfile suffix (`.mp4`, `.mov`, `.avi`, `.mkv`) based on validated upload extension.
+   - Enforced maximum video duration limit (`MAX_VIDEO_DURATION_SECONDS = 120`). Videos exceeding 120s are rejected with HTTP 400 `PROCESSING_ERROR` and persist zero scans.
+   - Enforced dual-layer video resolution bounds (`MAX_VIDEO_WIDTH = 4096`, `MAX_VIDEO_HEIGHT = 4096`, `MAX_VIDEO_PIXELS = 16_777_216`) on container metadata before frame sampling and on actual decoded frames (`frame.shape[:2]`) during sampling, rejecting oversized videos before expensive processing.
+   - Added 16 new automated tests (13 in `tests/test_video_detection.py`, 3 in `tests/test_video_persistence.py`).
+   - Total test suite expanded to **214 passed tests in 44.17s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 5 Step 2 (Image Resource Bounds + Decompression Bomb Protection + Heatmap Thumbnail Downscaling) is complete and verified with 198/198 tests passing and live in-process verification passed. Ready for user commit.
+- Phase 5 Step 3 (Video Temp File Cleanup + Video Resource Limits) is complete and verified with 214/214 tests passing and live in-process verification passed. Ready for user commit.
 
 ---
 
@@ -165,6 +172,7 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Authenticated Multimodal Persistence (Text, Image, Video, Audio)**: `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, and `POST /api/detect/audio` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media assets; raw binary files, frames, audio PCM samples, and numpy arrays are excluded from database storage.
 - **User-Scoped Scan History & Anti-IDOR 404**: `GET /api/scans` and `GET /api/scans/<id>` strictly filter by `user_id == g.current_user_id`; unowned scans return 404; list payloads exclude heavy `result_data`.
 - **Image Decompression Bomb & Resource Protection**: Rejects images exceeding 4096x4096px or 16MP before memory-intensive convolutions; downscales previews to 512px thumbnails.
+- **Video Resource Bounds & Deterministic Windows Cleanup**: Enforces duration limits (120s), resolution bounds (4096x4096px / 16MP), and guarantees `cap.release()` before `os.remove(temp_path)` in `finally:`, eliminating Windows file handle lock leaks (`WinError 32`).
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
@@ -172,18 +180,17 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 ## 5. Known Limitations & Remaining Problems
 1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
-3. **Video Cleanup on Windows**: Temporary file descriptors in `video_service.py` need `cap.release()` inside `try...finally` to prevent Windows file lock leaks on error (scheduled for Phase 5 Step 3).
-4. **Audio Decoding Reliability**: `audio_service.py` uses `scipy.io.wavfile` and synthetic noise fallback; needs format integrity hardening (scheduled for Phase 5 Step 4).
-5. **Basic File Validation**: Media validation inspects extensions; binary magic-byte inspection belongs to future security hardening (Phase 5 Step 5).
-6. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
-7. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
+3. **Audio Decoding Reliability**: `audio_service.py` uses `scipy.io.wavfile` and synthetic noise fallback; needs format integrity hardening (scheduled for Phase 5 Step 4).
+4. **Basic File Validation**: Media validation inspects extensions; binary magic-byte inspection belongs to future security hardening (Phase 5 Step 5).
+5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+6. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
 ## 6. Recommended Next Backend Task
-Proceed to **Phase 5 Step 3: Video Temporary File Cleanup Hardening & Resource Limits**:
-1. Enclose `cv2.VideoCapture` lifecycle in a deterministic context manager or `try...finally` to guarantee `cap.release()` executes before `os.remove(temp_path)` on Windows.
-2. Enforce video duration and frame resolution bounds to protect against video decoder resource starvation.
+Proceed to **Phase 5 Step 4: Audio Decoding Integrity & Synthetic Fallback Hardening**:
+1. Hardens audio ingestion against malformed WAV headers and unhandled decoding exceptions.
+2. Eliminates synthetic noise fallbacks that obscure malformed media.
 
 
 

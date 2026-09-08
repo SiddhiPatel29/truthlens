@@ -229,16 +229,25 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
   │
   ▼
 [backend/services/video_service.py: VideoDetectionService.analyze_video(file)]
-  1. Creates temporary file on disk: tempfile.mkstemp(suffix=".mp4")
-  2. Streams file.save(temp_path)
-  3. try...finally ensures os.remove(temp_path) executes even if errors occur
+  1. Derives dynamic extension suffix (.mp4, .mov, .avi, .mkv) from validated upload
+  2. Creates temporary file on disk: tempfile.mkstemp(suffix=f".{ext}")
+  3. Streams file.save(temp_path)
   4. Opens cv2.VideoCapture(temp_path)
-  5. Uniformly samples up to 16 keyframes across duration: np.linspace(...)
-  6. Reads sampled frames, computes Laplacian variance and anomaly score per frame
-  7. Tracks peak anomaly frame (suspicious_frame)
-  8. Calculates overall sequence confidence mean and temporal instability standard deviation
-  9. Renders Grad-CAM++ heatmap overlay on peak suspicious frame and encodes to Base64 data URL
-  10. Returns analysis dictionary
+  5. Validates video duration against policy (MAX_VIDEO_DURATION_SECONDS = 120):
+     - If total_frames / fps > 120: raises ValueError (rejected as 400 PROCESSING_ERROR)
+  6. Validates container resolution metadata (MAX_VIDEO_WIDTH=4096, MAX_VIDEO_HEIGHT=4096, MAX_PIXELS=16_777_216):
+     - If meta_w, meta_h exceed limits: raises ValueError (rejected as 400 PROCESSING_ERROR)
+  7. Uniformly samples up to 16 keyframes across duration: np.linspace(...)
+  8. For each sampled frame:
+     - Validates actual decoded frame.shape[:2] against width/height/pixel bounds
+     - Computes Laplacian variance and anomaly score per frame
+  9. Tracks peak anomaly frame (suspicious_frame)
+  10. Calculates overall sequence confidence mean and temporal instability standard deviation
+  11. Renders Grad-CAM++ heatmap overlay on peak suspicious frame and encodes to Base64 data URL
+  12. finally block guarantees deterministic cleanup order:
+     - cap.release() executes strictly BEFORE os.remove(temp_path)
+     - On Windows, this prevents PermissionError [WinError 32] file handle lock leaks
+  13. Returns analysis dictionary
   │
   ▼
 [backend/routes/video_routes.py: detect_video()]

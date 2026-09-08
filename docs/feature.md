@@ -376,6 +376,29 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 198 passed out of 198 tests in 25.21s.
 - **Current Status**: Complete.
 
+---
+
+## 20. Video Temp File Cleanup & Resource Hardening (Phase 5 Step 3)
+- **Status**: Completed (Phase 5 Step 3).
+- **Reason**: Fix the critical Windows file handle lock leak where `cv2.VideoCapture` prevented temporary file deletion on failure, orphaning up to 50 MB files on disk. Enforce bounded resource consumption with video duration limits (max 120s) and resolution limits (max 4096x4096 / 16 MP) at container metadata and decoded frame levels.
+- **Files Changed / Created**:
+  - `backend/services/video_service.py` (Modified - restructured VideoCapture and tempfile lifecycle with deterministic `cap.release() -> os.remove()` cleanup order; dynamic upload suffix matching; enforced `MAX_VIDEO_DURATION_SECONDS = 120` and `MAX_VIDEO_WIDTH = 4096`, `MAX_VIDEO_HEIGHT = 4096`, `MAX_VIDEO_PIXELS = 16_777_216` on container metadata and decoded frame sampling)
+  - `tests/test_video_detection.py` (Modified - added 13 focused tests for cleanup ordering, failure cleanup, duration limit, resolution bounds, boundary cases, and dynamic extensions)
+  - `tests/test_video_persistence.py` (Modified - added 3 tests ensuring oversized duration/resolution videos create zero Scan records)
+- **Implementation**:
+  - **Deterministic Cleanup**: VideoCapture handle release is guaranteed before `os.remove(temp_path)` in `finally:`, preventing Windows `PermissionError [WinError 32]`. Warnings logged on failure instead of silent swallowing.
+  - **Dynamic Extension Suffix**: Derives tempfile suffix from validated extension (`.mp4`, `.mov`, `.avi`, `.mkv`), safely defaulting to `.mp4`.
+  - **Duration Bound**: If `fps > 0 and total_frames > 0` and `total_frames / fps > 120`, raises `ValueError` returning HTTP 400 `PROCESSING_ERROR` before keyframe sampling.
+  - **Resolution Bounds**: Reads `CAP_PROP_FRAME_WIDTH` and `CAP_PROP_FRAME_HEIGHT` first, rejecting oversized videos at zero decode cost. Validates `frame.shape[:2]` during sampling to guard against missing/spoofed metadata.
+  - **Persistence Invariant**: Rejected oversized/invalid videos abort before `ScanService.create_scan()`, persisting 0 scans.
+  - **Detection Algorithm Preservation**: Number of sampled frames (16), Laplacian scoring, temporal instability, deepfake verdict threshold (0.65), and risk mapping remain identical.
+- **Tests**:
+  - `tests/test_video_detection.py` (18 tests passed in 4.54s).
+  - `tests/test_video_persistence.py` (14 tests passed in 4.19s).
+  - Complete test suite: 214 passed out of 214 tests in 44.17s.
+- **Current Status**: Complete.
+
+
 
 
 

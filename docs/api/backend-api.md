@@ -292,6 +292,8 @@ None.
 4. Extension must be in `{"mp4", "mov", "avi", "mkv"}`.
 5. Video file must have at least 1 readable frame.
 6. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
+7. Video duration must not exceed 120 seconds (`MAX_VIDEO_DURATION_SECONDS`). Videos exceeding 120s are rejected with HTTP 400 `PROCESSING_ERROR`.
+8. Video container resolution and decoded frames must not exceed 4096x4096 px or 16,777,216 pixels (`MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `MAX_VIDEO_PIXELS`). Oversized videos are rejected with HTTP 400 `PROCESSING_ERROR`.
 
 ### Success Response (`200 OK`)
 ```json
@@ -373,6 +375,33 @@ None.
   {
     "success": false,
     "message": "Failed to open or decode video stream.",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Video duration exceeds limit (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Video duration (125.0s) exceeds maximum permitted limit (120s).",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Video resolution exceeds limit (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Video resolution (5000x4000) exceeds maximum permitted limits (max 4096x4096, max 16777216 pixels).",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Decoded frame resolution exceeds limit (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Decoded video frame resolution (4800x4800) exceeds maximum permitted limits (max 4096x4096, max 16777216 pixels).",
     "data": null,
     "error_code": "PROCESSING_ERROR"
   }

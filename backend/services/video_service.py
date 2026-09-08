@@ -6,8 +6,18 @@ and renders a keyframe Grad-CAM++ preview.
 import os
 import tempfile
 import base64
+import logging
 import numpy as np
 import cv2
+from backend.utils.file_validator import ALLOWED_VIDEO_EXTENSIONS
+
+logger = logging.getLogger(__name__)
+
+# Video resource bounds
+MAX_VIDEO_DURATION_SECONDS = 120
+MAX_VIDEO_WIDTH = 4096
+MAX_VIDEO_HEIGHT = 4096
+MAX_VIDEO_PIXELS = 16_777_216
 
 class VideoDetectionService:
     @staticmethod
@@ -16,8 +26,18 @@ class VideoDetectionService:
         Processes an uploaded video file, extracts sample frames,
         and scores temporal and spatial artifacts.
         """
+        # Determine temporary file suffix from validated extension
+        ext = "mp4"
+        if file_storage and getattr(file_storage, "filename", None):
+            filename = file_storage.filename
+            if "." in filename:
+                cand_ext = filename.rsplit(".", 1)[1].lower()
+                if cand_ext in ALLOWED_VIDEO_EXTENSIONS:
+                    ext = cand_ext
+
         # 1. Save video stream to a temporary file on disk for OpenCV reading
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+        temp_fd, temp_path = tempfile.mkstemp(suffix=f".{ext}")
+        cap = None
         try:
             with os.fdopen(temp_fd, "wb") as f:
                 file_storage.save(f)
@@ -26,12 +46,34 @@ class VideoDetectionService:
             if not cap.isOpened():
                 raise ValueError("Failed to open or decode video stream.")
 
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-            duration_sec = round(total_frames / fps, 2) if total_frames > 0 else 0.0
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            raw_fps = cap.get(cv2.CAP_PROP_FPS)
+            fps = float(raw_fps) if raw_fps and raw_fps > 0 else 30.0
+
+            # Duration check (enforced if fps > 0 and total_frames > 0)
+            if total_frames > 0 and fps > 0:
+                duration_sec = round(total_frames / fps, 2)
+                if duration_sec > MAX_VIDEO_DURATION_SECONDS:
+                    raise ValueError(
+                        f"Video duration ({duration_sec}s) exceeds maximum permitted limit ({MAX_VIDEO_DURATION_SECONDS}s)."
+                    )
+            elif total_frames > 0:
+                duration_sec = round(total_frames / 30.0, 2)
+            else:
+                duration_sec = 0.0
 
             if total_frames <= 0:
                 raise ValueError("Uploaded video contains zero readable frames.")
+
+            # Container metadata resolution check
+            meta_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            meta_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            if meta_w > 0 and meta_h > 0:
+                if meta_w > MAX_VIDEO_WIDTH or meta_h > MAX_VIDEO_HEIGHT or (meta_w * meta_h) > MAX_VIDEO_PIXELS:
+                    raise ValueError(
+                        f"Video resolution ({meta_w}x{meta_h}) exceeds maximum permitted limits "
+                        f"(max {MAX_VIDEO_WIDTH}x{MAX_VIDEO_HEIGHT}, max {MAX_VIDEO_PIXELS} pixels)."
+                    )
 
             # Sample up to 16 frames uniformly across the video
             sample_count = min(16, total_frames)
@@ -47,6 +89,14 @@ class VideoDetectionService:
                 if not ret or frame is None:
                     continue
 
+                # Validate actual decoded frame dimensions against resource bounds
+                frame_h, frame_w = frame.shape[:2]
+                if frame_w > MAX_VIDEO_WIDTH or frame_h > MAX_VIDEO_HEIGHT or (frame_w * frame_h) > MAX_VIDEO_PIXELS:
+                    raise ValueError(
+                        f"Decoded video frame resolution ({frame_w}x{frame_h}) exceeds maximum permitted limits "
+                        f"(max {MAX_VIDEO_WIDTH}x{MAX_VIDEO_HEIGHT}, max {MAX_VIDEO_PIXELS} pixels)."
+                    )
+
                 # Texture variance measurement
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -58,8 +108,6 @@ class VideoDetectionService:
                 if score > highest_score:
                     highest_score = score
                     suspicious_frame = frame
-
-            cap.release()
 
             if not frame_scores:
                 raise ValueError("Failed to extract valid frames from video.")
@@ -100,9 +148,17 @@ class VideoDetectionService:
             }
 
         finally:
-            # Always remove the temporary file to prevent disk exhaustion
+            # Deterministic cleanup: release VideoCapture handle BEFORE removing temp file.
+            # On Windows, attempting to delete an open file raises PermissionError (WinError 32),
+            # causing permanent temp file leakage on disk.
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception as e:
+                    logger.warning("Error releasing VideoCapture handle: %s", str(e))
+
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.warning("Failed to remove temporary video file %s: %s", temp_path, str(e))

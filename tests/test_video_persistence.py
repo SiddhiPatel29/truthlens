@@ -15,7 +15,8 @@ import os
 import time
 import pytest
 import jwt
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import cv2
 from werkzeug.security import generate_password_hash
 from backend.database.db import db
 from backend.database.models import User, Scan, ScanResult
@@ -547,3 +548,159 @@ def test_multiple_authenticated_users_video_scan_isolation(
         # Verify distinct scan IDs and cross-isolation
         assert scans_a[0].id != scans_b[0].id
         assert scans_a[0].result.id != scans_b[0].result.id
+
+
+# ===========================================================================
+# 12. Oversized Duration Video Persists No Scan
+# ===========================================================================
+
+def test_oversized_duration_video_persists_no_scan(
+    client, app, real_video_path, auth_headers_a
+):
+    """
+    12. Video exceeding maximum duration (120s):
+        - Returns HTTP 400 PROCESSING_ERROR.
+        - Exactly zero Scan and ScanResult records are created in DB.
+    """
+    real_VideoCapture = cv2.VideoCapture
+
+    class FakeOversizedDurationCapture:
+        def __init__(self, *args, **kwargs):
+            self._real = real_VideoCapture(*args, **kwargs)
+        def isOpened(self):
+            return True
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_COUNT:
+                return 3630  # 121s at 30 fps
+            if prop == cv2.CAP_PROP_FPS:
+                return 30.0
+            return self._real.get(prop)
+        def set(self, prop, val):
+            return self._real.set(prop, val)
+        def read(self):
+            return self._real.read()
+        def release(self):
+            return self._real.release()
+
+    with patch("cv2.VideoCapture", side_effect=FakeOversizedDurationCapture):
+        with open(real_video_path, "rb") as vid_file:
+            response = client.post(
+                "/api/detect/video",
+                data={"video": (vid_file, "long_video.mp4")},
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+# ===========================================================================
+# 13. Oversized Resolution Video Persists No Scan
+# ===========================================================================
+
+def test_oversized_resolution_metadata_persists_no_scan(
+    client, app, real_video_path, auth_headers_a
+):
+    """
+    13. Video exceeding resolution limits in container metadata:
+        - Returns HTTP 400 PROCESSING_ERROR.
+        - Exactly zero Scan and ScanResult records are created in DB.
+    """
+    real_VideoCapture = cv2.VideoCapture
+
+    class FakeOversizedResolutionCapture:
+        def __init__(self, *args, **kwargs):
+            self._real = real_VideoCapture(*args, **kwargs)
+        def isOpened(self):
+            return True
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return 4097
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return 1080
+            return self._real.get(prop)
+        def set(self, prop, val):
+            return self._real.set(prop, val)
+        def read(self):
+            return self._real.read()
+        def release(self):
+            return self._real.release()
+
+    with patch("cv2.VideoCapture", side_effect=FakeOversizedResolutionCapture):
+        with open(real_video_path, "rb") as vid_file:
+            response = client.post(
+                "/api/detect/video",
+                data={"video": (vid_file, "huge_res.mp4")},
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+# ===========================================================================
+# 14. Oversized Decoded Frame Persists No Scan
+# ===========================================================================
+
+def test_oversized_decoded_frame_persists_no_scan(
+    client, app, real_video_path, auth_headers_a
+):
+    """
+    14. Decoded frame exceeding resolution bounds during sampling:
+        - Returns HTTP 400 PROCESSING_ERROR.
+        - Exactly zero Scan and ScanResult records are created in DB.
+    """
+    real_VideoCapture = cv2.VideoCapture
+    fake_frame = MagicMock()
+    fake_frame.shape = (4800, 4800, 3)
+
+    class FakeOversizedFrameCapture:
+        def __init__(self, *args, **kwargs):
+            self._real = real_VideoCapture(*args, **kwargs)
+        def isOpened(self):
+            return self._real.isOpened()
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return 640
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return 480
+            return self._real.get(prop)
+        def set(self, prop, val):
+            return self._real.set(prop, val)
+        def read(self):
+            return True, fake_frame
+        def release(self):
+            return self._real.release()
+
+    with patch("cv2.VideoCapture", side_effect=FakeOversizedFrameCapture):
+        with open(real_video_path, "rb") as vid_file:
+            response = client.post(
+                "/api/detect/video",
+                data={"video": (vid_file, "frame_bomb.mp4")},
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+

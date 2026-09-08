@@ -40,6 +40,19 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_video_detection.py` | `test_detect_video_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
 | `test_video_detection.py` | `test_detect_video_unsupported_extension` | Unsupported file extension | **PASSED** | Returned HTTP 400 with `UNSUPPORTED_MEDIA_TYPE` |
 | `test_video_detection.py` | `test_detect_video_corrupt_content` | Corrupt video byte stream | **PASSED** | Returned HTTP 400 with `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_tempfile_cleanup_on_success` | Temp file removal on success | **PASSED** | Temp file confirmed removed from disk after 200 response |
+| `test_video_detection.py` | `test_detect_video_cleanup_ordering_windows_semantics` | Windows file lock order | **PASSED** | `cap.release()` executed strictly before `os.remove()` |
+| `test_video_detection.py` | `test_detect_video_cleanup_when_not_opened` | Cleanup when cap.isOpened() False | **PASSED** | `cap.release()` and `os.remove()` executed, 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_cleanup_when_zero_frames` | Cleanup on zero readable frames | **PASSED** | `cap.release()` and `os.remove()` executed, 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_cleanup_when_exception_during_processing` | Cleanup on runtime error in read | **PASSED** | `cap.release()` and `os.remove()` executed in `finally`, 500 error |
+| `test_video_detection.py` | `test_detect_video_duration_exceeding_limit_rejected_400` | Duration limit rejection (>120s) | **PASSED** | 121s video rejected with HTTP 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_duration_boundary_120_seconds_accepted` | Duration boundary (120.0s) | **PASSED** | Exactly 120.0s video accepted, returned HTTP 200 |
+| `test_video_detection.py` | `test_detect_video_metadata_resolution_exceeding_width_rejected_400` | Metadata width limit (>4096) | **PASSED** | Width 4097 rejected with HTTP 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_metadata_resolution_exceeding_height_rejected_400` | Metadata height limit (>4096) | **PASSED** | Height 4097 rejected with HTTP 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_metadata_resolution_exceeding_pixels_rejected_400` | Metadata pixel limit (>16MP) | **PASSED** | 4000x4200 (16.8MP) rejected with HTTP 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_decoded_frame_exceeding_resolution_rejected_400` | Decoded frame dimension limit | **PASSED** | Decoded frame 4500x4500 rejected with HTTP 400 `PROCESSING_ERROR` |
+| `test_video_detection.py` | `test_detect_video_resolution_boundary_4096_accepted` | Resolution boundary (4096x4096) | **PASSED** | Boundary 4096x4096 accepted, returned HTTP 200 |
+| `test_video_detection.py` | `test_detect_video_dynamic_tempfile_suffix` | Dynamic extension suffix | **PASSED** | `.mov`, `.avi`, `.mkv` files create matching temporary suffixes |
 | `test_audio_detection.py` | `test_detect_audio_success` | Valid audio analysis | **PASSED** | Returned HTTP 200 with spectral metrics |
 | `test_audio_detection.py` | `test_detect_audio_missing_file_field` | Missing file in upload | **PASSED** | Returned HTTP 400 with `MISSING_FILE` |
 | `test_audio_detection.py` | `test_detect_audio_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
@@ -179,6 +192,9 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_video_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
 | `test_video_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_video_persistence.py` | `test_multiple_authenticated_users_video_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
+| `test_video_persistence.py` | `test_oversized_duration_video_persists_no_scan` | Oversized duration persistence guard | **PASSED** | 121s video returns 400, persists 0 Scan and 0 ScanResult records |
+| `test_video_persistence.py` | `test_oversized_resolution_metadata_persists_no_scan` | Oversized metadata resolution guard | **PASSED** | 4097x1080 video returns 400, persists 0 Scan and 0 ScanResult records |
+| `test_video_persistence.py` | `test_oversized_decoded_frame_persists_no_scan` | Oversized decoded frame guard | **PASSED** | 4800x4800 frame returns 400, persists 0 Scan and 0 ScanResult records |
 | `test_audio_persistence.py` | `test_valid_authenticated_audio_request_persists_scan_and_result` | Valid audio persistence | **PASSED** | Returned 200, Scan COMPLETED, filename 'test.wav', ScanResult fields match |
 | `test_audio_persistence.py` | `test_missing_auth_header_returns_401_no_scan_created` | Unauthenticated audio request | **PASSED** | Returned 401 `AUTHENTICATION_REQUIRED`, 0 scans, audio processing skipped |
 | `test_audio_persistence.py` | `test_invalid_jwt_returns_401_no_scan_created` | Invalid Bearer token | **PASSED** | Returned 401 `INVALID_TOKEN`, 0 scans created in DB |
@@ -216,7 +232,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 ## 2. Live HTTP Server Verification Tests
 
 - **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
-- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`, `scratch/verify_live_image_hardening.py`)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`, `scratch/verify_live_image_hardening.py`, `scratch/verify_live_video_hardening.py`)
 - **Result Summary**: All live verification checks passed
 
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
@@ -235,6 +251,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/video` | POST | Multipart (`test.mp4`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/video` | POST | Multipart (`test.mp4`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/video` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Oversized duration 122s, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Oversized meta 5000x4000, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Oversized frame 4800x4800, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Corrupt video payload, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Cleanup order cap.release before remove) | 200 | 200 | True | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Dynamic suffix .mov, .avi, .mkv) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (`test.wav`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
