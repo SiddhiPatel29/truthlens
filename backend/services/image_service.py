@@ -6,6 +6,12 @@ import base64
 import numpy as np
 import cv2
 
+# Resource policy constants to guard against decompression bombs and excessive memory consumption
+MAX_IMAGE_WIDTH = 4096
+MAX_IMAGE_HEIGHT = 4096
+MAX_IMAGE_PIXELS = 16_777_216  # 4096 * 4096 (16 Megapixels)
+MAX_PREVIEW_DIMENSION = 512
+
 class ImageDetectionService:
     @staticmethod
     def analyze_image(file_bytes: bytes) -> dict:
@@ -25,11 +31,18 @@ class ImageDetectionService:
 
         h, w = img.shape[:2]
 
-        # 2. Extract edge & texture variance (Laplacian variance check)
+        # 2. Enforce image dimension and pixel safety bounds before expensive processing
+        if w <= 0 or h <= 0 or w > MAX_IMAGE_WIDTH or h > MAX_IMAGE_HEIGHT or (w * h) > MAX_IMAGE_PIXELS:
+            raise ValueError(
+                f"Image dimensions ({w}x{h}) exceed maximum permitted limits "
+                f"(max width: {MAX_IMAGE_WIDTH}, max height: {MAX_IMAGE_HEIGHT}, max pixels: {MAX_IMAGE_PIXELS})."
+            )
+
+        # 3. Extract edge & texture variance (Laplacian variance check)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-        # 3. Generate a dynamic Heatmap Mask
+        # 4. Generate a dynamic Heatmap Mask
         # Determine kernel size safely based on image dimensions
         k_size = max(15, (min(h, w) // 5) | 1)  # Ensure it is an odd integer
         center_x, center_y = w // 2, h // 2
@@ -40,20 +53,30 @@ class ImageDetectionService:
         cv2.circle(mask, (center_x, center_y), radius, 1.0, -1)
         mask = cv2.GaussianBlur(mask, (k_size, k_size), 0)
 
-        # 4. Colorize Heatmap using JET Colormap
+        # 5. Colorize Heatmap using JET Colormap
         heatmap_norm = np.clip(mask * 255, 0, 255).astype(np.uint8)
         heatmap_color = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
 
-        # 5. Blend heatmap overlay with original image (60% original + 40% heatmap)
+        # 6. Blend heatmap overlay with original image (60% original + 40% heatmap)
         overlay = cv2.addWeighted(img, 0.6, heatmap_color, 0.4, 0)
 
-        # 6. Calculate Confidence Score
+        # 7. Calculate Confidence Score
         base_noise = (laplacian_var % 100) / 100.0
         confidence_score = round(float(max(0.15, min(0.96, 0.40 + (base_noise * 0.5)))), 3)
         is_deepfake = confidence_score > 0.65
 
-        # 7. Encode the overlay to JPEG Base64 data URL
-        success, buffer = cv2.imencode(".jpg", overlay)
+        # 8. Downscale overlay to thumbnail representation for preview storage
+        max_dim = max(h, w)
+        if max_dim > MAX_PREVIEW_DIMENSION:
+            scale = MAX_PREVIEW_DIMENSION / float(max_dim)
+            new_w = max(1, int(round(w * scale)))
+            new_h = max(1, int(round(h * scale)))
+            preview_overlay = cv2.resize(overlay, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            preview_overlay = overlay
+
+        # 9. Encode the thumbnail overlay to JPEG Base64 data URL
+        success, buffer = cv2.imencode(".jpg", preview_overlay)
         if not success:
             raise ValueError("Failed to encode processed heatmap preview.")
 

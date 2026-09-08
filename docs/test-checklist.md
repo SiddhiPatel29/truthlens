@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-08
-- **Result Summary**: **190 passed, 0 failed, 0 skipped in 26.01s**
+- **Result Summary**: **198 passed, 0 failed, 0 skipped in 25.21s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -29,6 +29,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_image_detection.py` | `test_detect_image_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
 | `test_image_detection.py` | `test_detect_image_unsupported_extension` | Unsupported file extension | **PASSED** | Returned HTTP 400 with `UNSUPPORTED_MEDIA_TYPE` |
 | `test_image_detection.py` | `test_detect_image_corrupt_content` | Unparseable/corrupt image | **PASSED** | Returned HTTP 400 with `CORRUPT_OR_UNREADABLE_FILE` |
+| `test_image_detection.py` | `test_detect_image_width_exceeding_maximum_rejected_400` | Width limit enforcement | **PASSED** | Width 5000 > 4096 rejected with 400 `PROCESSING_ERROR`, 0 scans |
+| `test_image_detection.py` | `test_detect_image_height_exceeding_maximum_rejected_400` | Height limit enforcement | **PASSED** | Height 5000 > 4096 rejected with 400 `PROCESSING_ERROR`, 0 scans |
+| `test_image_detection.py` | `test_detect_image_pixel_count_exceeding_maximum_rejected_400` | Total pixel count limit | **PASSED** | Total pixels > MAX_IMAGE_PIXELS rejected with 400 `PROCESSING_ERROR`, 0 scans |
+| `test_image_detection.py` | `test_detect_image_boundary_case_permitted` | Maximum boundary acceptance | **PASSED** | Width 4096 boundary accepted, 200 OK, scan persisted |
+| `test_image_detection.py` | `test_detect_image_heatmap_thumbnail_dimensions_downscaled` | Heatmap thumbnail downscaling | **PASSED** | 1000x600 overlay downscaled to 512x307 maintaining aspect ratio |
+| `test_image_detection.py` | `test_detect_image_heatmap_small_source_not_upscaled` | Small image no-upscale rule | **PASSED** | 200x150 overlay remains 200x150 without upscaling |
 | `test_video_detection.py` | `test_detect_video_success` | Valid video analysis | **PASSED** | Returned HTTP 200 with temporal metrics |
 | `test_video_detection.py` | `test_detect_video_missing_file_field` | Missing file in upload | **PASSED** | Returned HTTP 400 with `MISSING_FILE` |
 | `test_video_detection.py` | `test_detect_video_empty_filename` | Empty filename uploaded | **PASSED** | Returned HTTP 400 with `NO_SELECTED_FILE` |
@@ -160,6 +166,8 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_image_persistence.py` | `test_create_scan_database_failure_returns_sanitized_500` | DB failure on create_scan | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 scans |
 | `test_image_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_image_persistence.py` | `test_multiple_authenticated_users_image_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
+| `test_image_persistence.py` | `test_oversized_image_persists_no_scan` | Oversized image rejection persistence | **PASSED** | 5000x1000 image rejected with 400, 0 Scan or ScanResult records created |
+| `test_image_persistence.py` | `test_persisted_image_scan_result_contains_downscaled_thumbnail` | Thumbnail persistence in ScanResult | **PASSED** | 1000x600 scan persists 512x307 thumbnail in result_data |
 | `test_video_persistence.py` | `test_valid_authenticated_video_request_persists_scan_and_result` | Valid video persistence | **PASSED** | Returned 200, Scan COMPLETED, filename 'test.mp4', ScanResult fields match |
 | `test_video_persistence.py` | `test_missing_auth_header_returns_401_no_scan_created` | Unauthenticated video request | **PASSED** | Returned 401 `AUTHENTICATION_REQUIRED`, 0 scans, video processing skipped |
 | `test_video_persistence.py` | `test_invalid_jwt_returns_401_no_scan_created` | Invalid Bearer token | **PASSED** | Returned 401 `INVALID_TOKEN`, 0 scans created in DB |
@@ -208,7 +216,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 ## 2. Live HTTP Server Verification Tests
 
 - **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
-- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`, `scratch/verify_live_image_hardening.py`)
 - **Result Summary**: All live verification checks passed
 
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
@@ -220,6 +228,10 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/image` | POST | Multipart (`test.jpg`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/image` | POST | Multipart (`test.jpg`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/image` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Oversized 5000x1000, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Oversized 1000x5000, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (1000x600, Bearer token, thumb 512x307)| 200 | 200 | True | **PASSED** |
+| `/api/detect/image` | POST | Multipart (200x150, Bearer token, thumb 200x150)| 200 | 200 | True | **PASSED** |
 | `/api/detect/video` | POST | Multipart (`test.mp4`, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/video` | POST | Multipart (`test.mp4`, Missing Authorization) | 401 | 401 | False | **PASSED** |
 | `/api/detect/video` | POST | Multipart (Missing file, Bearer token) | 400 | 400 | False | **PASSED** |

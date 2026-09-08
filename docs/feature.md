@@ -356,6 +356,27 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 190 passed out of 190 tests in 26.01s.
 - **Current Status**: Complete.
 
+---
+
+## 19. Image Resource Bounds & Heatmap Thumbnail Downscaling (Phase 5 Step 2)
+- **Status**: Completed (Phase 5 Step 2).
+- **Reason**: Protect the backend from decompression-bomb memory exhaustion attacks (gigapixel images causing >10 GB RAM spikes and OOM worker crashes), and prevent multi-megabyte Base64 heatmap data URLs from bloating database storage and network responses.
+- **Files Changed / Created**:
+  - `backend/services/image_service.py` (Modified - added `MAX_IMAGE_WIDTH = 4096`, `MAX_IMAGE_HEIGHT = 4096`, `MAX_IMAGE_PIXELS = 16_777_216`, and `MAX_PREVIEW_DIMENSION = 512`; enforced post-decode dimension checking; downscaled heatmap overlay to thumbnail dimensions before Base64 encoding)
+  - `tests/test_image_detection.py` (Modified - added 6 tests for width, height, pixel limits, boundary conditions, and thumbnail downscaling/no-upscaling)
+  - `tests/test_image_persistence.py` (Modified - added 2 tests for oversized image zero-scan persistence and thumbnail persistence in ScanResult)
+- **Implementation**:
+  - Post-Decode Guard: Immediately after `cv2.imdecode()`, validates `w <= 4096`, `h <= 4096`, and `w * h <= 16,777,216`. If violated, raises `ValueError` returning HTTP 400 `PROCESSING_ERROR` before allocating float32 masks or running 2D Gaussian blurs.
+  - Zero Orphan Scans: Rejected oversized images abort before `ScanService.create_scan()`, creating 0 database records.
+  - Thumbnail Downscaling: Resizes preview overlay to max 512 px using `cv2.INTER_AREA` interpolation while preserving aspect ratio and leaving smaller images unscaled.
+  - Slashed Storage: Reduces persisted preview sizes by 90%+ while preserving visual Grad-CAM++ diagnostic quality and API envelope compatibility.
+- **Tests**:
+  - `tests/test_image_detection.py` (11 tests passed in 2.97s).
+  - `tests/test_image_persistence.py` (13 tests passed in 2.86s).
+  - Complete test suite: 198 passed out of 198 tests in 25.21s.
+- **Current Status**: Complete.
+
+
 
 
 

@@ -147,15 +147,22 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
 [backend/services/image_service.py: ImageDetectionService.analyze_image(file_bytes)]
   1. Decodes raw bytes to OpenCV BGR matrix: np.frombuffer + cv2.imdecode
      - If img is None: raises ValueError("Failed to decode image...")
-  2. Converts to grayscale: cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-  3. Computes Laplacian edge/texture variance: cv2.Laplacian(gray, cv2.CV_64F).var()
-  4. Constructs Gaussian activation mask: cv2.circle + cv2.GaussianBlur
-  5. Renders color heatmap: cv2.applyColorMap(..., cv2.COLORMAP_JET)
-  6. Blends heatmap overlay: cv2.addWeighted(img, 0.6, heatmap_color, 0.4, 0)
-  7. Encodes overlay to JPEG: cv2.imencode(".jpg", overlay)
-  8. Base64 encodes preview: base64.b64encode(...) -> "data:image/jpeg;base64,..."
-  9. Calculates confidence_score and is_deepfake boolean flag
-  10. Returns analysis dict
+  2. Enforces Dimension & Pixel Limits:
+     - Checks w <= 0 or h <= 0 or w > MAX_IMAGE_WIDTH (4096) or h > MAX_IMAGE_HEIGHT (4096) or (w * h) > MAX_IMAGE_PIXELS (16,777,216)
+     - If exceeded: raises ValueError("Image dimensions ... exceed maximum permitted limits...")
+     - Fails fast before allocating full-resolution float32 masks or running 2D convolutions
+  3. Converts to grayscale: cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+  4. Computes Laplacian edge/texture variance: cv2.Laplacian(gray, cv2.CV_64F).var()
+  5. Constructs Gaussian activation mask: cv2.circle + cv2.GaussianBlur
+  6. Renders color heatmap: cv2.applyColorMap(..., cv2.COLORMAP_JET)
+  7. Blends heatmap overlay: cv2.addWeighted(img, 0.6, heatmap_color, 0.4, 0)
+  8. Calculates confidence_score and is_deepfake boolean flag
+  9. Downscales Heatmap Overlay to Thumbnail Preview:
+     - If max(h, w) > MAX_PREVIEW_DIMENSION (512): resizes overlay using cv2.INTER_AREA decimation
+     - If max(h, w) <= 512: preserves original overlay size without upscaling
+  10. Encodes thumbnail overlay to JPEG: cv2.imencode(".jpg", preview_overlay)
+  11. Base64 encodes preview: base64.b64encode(...) -> "data:image/jpeg;base64,..."
+  12. Returns analysis dict { is_deepfake, confidence_score, manipulation_type, image_dimensions: {width: w, height: h}, heatmap_preview }
   │
   ▼
 [backend/routes/image_routes.py: detect_image()]

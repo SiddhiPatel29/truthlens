@@ -10,9 +10,12 @@ Verifies that POST /api/detect/image:
 - Enforces strict user isolation across multiple authenticated accounts.
 - Sanitizes server errors without leaking raw database or exception details.
 """
+import base64
 import io
 import os
 import time
+import cv2
+import numpy as np
 import pytest
 import jwt
 from unittest.mock import patch
@@ -20,6 +23,24 @@ from werkzeug.security import generate_password_hash
 from backend.database.db import db
 from backend.database.models import User, Scan, ScanResult
 from backend.services.scan_service import ScanService, ScanDatabaseError
+
+def make_test_jpeg(width: int, height: int, color=(128, 128, 128)) -> io.BytesIO:
+    """Creates a synthetic in-memory JPEG image with specified dimensions."""
+    arr = np.full((height, width, 3), color, dtype=np.uint8)
+    success, buf = cv2.imencode(".jpg", arr)
+    assert success, f"Failed to encode test image of dimensions {width}x{height}"
+    return io.BytesIO(buf.tobytes())
+
+def decode_base64_jpeg(data_url: str):
+    """Decodes a Base64 data URL into an OpenCV image matrix."""
+    prefix = "data:image/jpeg;base64,"
+    assert data_url.startswith(prefix), f"Expected prefix {prefix}"
+    b64_str = data_url[len(prefix):]
+    raw_bytes = base64.b64decode(b64_str)
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    assert img is not None, "Failed to decode Base64 JPEG into OpenCV matrix"
+    return img
 
 @pytest.fixture(autouse=True)
 def clean_db(app):
@@ -520,3 +541,67 @@ def test_multiple_authenticated_users_image_scan_isolation(
         # Verify distinct scan IDs and cross-isolation
         assert scans_a[0].id != scans_b[0].id
         assert scans_a[0].result.id != scans_b[0].result.id
+
+def test_oversized_image_persists_no_scan(client, app, auth_headers_a):
+    """Verify that an oversized image (5000x1000) rejected with 400 creates zero Scan or ScanResult records."""
+    img_io = make_test_jpeg(width=5000, height=1000)
+    data = {"image": (img_io, "oversized_test.jpg")}
+
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+def test_persisted_image_scan_result_contains_downscaled_thumbnail(client, app, auth_headers_a, auth_user_a):
+    """Verify that a large image scan persists a thumbnail heatmap preview (<= 512px) in ScanResult.result_data."""
+    img_io = make_test_jpeg(width=1000, height=600)
+    data = {"image": (img_io, "hires_photo.jpg")}
+
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+
+    with app.app_context():
+        assert Scan.query.count() == 1
+        assert ScanResult.query.count() == 1
+
+        scan = Scan.query.filter_by(user_id=auth_user_a["id"]).first()
+        assert scan is not None
+        assert scan.status == "COMPLETED"
+        assert scan.filename == "hires_photo.jpg"
+
+        result = scan.result
+        assert result is not None
+        assert isinstance(result.result_data, dict)
+        assert result.result_data["image_dimensions"] == {"width": 1000, "height": 600}
+
+        # Check persisted heatmap preview
+        persisted_preview = result.result_data.get("heatmap_preview")
+        assert persisted_preview is not None
+        assert persisted_preview.startswith("data:image/jpeg;base64,")
+
+        # Decode persisted thumbnail and verify dimensions <= 512
+        thumb = decode_base64_jpeg(persisted_preview)
+        assert thumb.shape[1] == 512
+        assert thumb.shape[0] == 307
+        assert thumb.shape[1] <= 512
+        assert thumb.shape[0] <= 512
+

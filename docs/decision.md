@@ -534,6 +534,35 @@ Implement user-scoped scan history listing (`GET /api/scans`) and individual sca
 6. **Eager Loading (N+1 Query Elimination)**:
    To prevent executing individual SQL queries for each scan's 1-to-1 `ScanResult` relation, queries utilize `options(joinedload(Scan.result))` to fetch parent and child entities in a single SQL query with outer join.
 
+---
+
+## Decision 24: Image Resource Bounds, Decompression Bomb Protection, and Heatmap Thumbnail Downscaling (Phase 5 Step 2)
+
+### Decision
+Enforce strict image dimension and pixel limits (`MAX_IMAGE_WIDTH = 4096`, `MAX_IMAGE_HEIGHT = 4096`, `MAX_IMAGE_PIXELS = 16_777_216`) immediately after `cv2.imdecode()` and before full-resolution mask allocation or blur convolutions in `ImageDetectionService.analyze_image`. In addition, downscale generated heatmap overlays to a thumbnail representation (maximum dimension `512` px, preserving aspect ratio without upscaling smaller source images) before Base64 JPEG encoding and database persistence.
+
+### Reasons & Architectural Principles
+
+1. **Why Compressed Upload Size Alone Is Insufficient**:
+   Flask's `MAX_CONTENT_LENGTH` (50 MB) limits only the HTTP request payload size over the network. A highly compressible image format (such as PNG or WebP) can pack an enormous raster matrix (e.g., $30,000 \times 30,000$ pixels) into a tiny file (< 500 KB). When decoded into uncompressed raw NumPy arrays and processed with single-precision float32 masks ($w \times h \times 4$ bytes), memory consumption balloons past 10 GB within seconds, triggering an immediate process crash via the operating system Out-Of-Memory (OOM) killer.
+
+2. **Compound Resource Policy (Width, Height, and Total Pixels)**:
+   Checking both individual dimensions ($w \le 4096, h \le 4096$) and total pixel count ($w \times h \le 16,777,216$) guards against extreme aspect ratio edge cases and guarantees an absolute upper bound of ~67 MB for any intermediate float32 mask array, ensuring deterministic memory predictability under concurrent workloads.
+
+3. **Execution Order and Memory Safety**:
+   The validation check executes immediately after `cv2.imdecode()` and before any expensive full-resolution image manipulation:
+   - Evaluated before `np.zeros((h, w), dtype=np.float32)` mask allocation.
+   - Evaluated before `cv2.GaussianBlur` 2D kernel convolution.
+   - Evaluated before `cv2.applyColorMap` colorization and alpha blending.
+   If limits are exceeded, a `ValueError` is raised immediately, caught by `image_routes.py`, and returned as HTTP 400 (`PROCESSING_ERROR`) without creating or persisting a `Scan` record in the database.
+
+4. **Heatmap Thumbnail Downscaling for Database & Network Efficiency**:
+   Previously, heatmap previews were encoded at the full input image resolution. For a 12 MP photo, the persisted Base64 JPEG data URL exceeded 1.5 MB in `ScanResult.result_data`. Downscaling the preview overlay to a maximum dimension of 512 px (using `cv2.INTER_AREA` interpolation) preserves the visual Grad-CAM++ diagnostic quality while capping preview payloads at ~20 KB to 50 KB, reducing database storage and detail API transmission costs by 90%+. Images smaller than 512 px are left unscaled to preserve original fidelity.
+
+5. **Security vs. Legitimate High-Resolution Tradeoff**:
+   A ceiling of $4096 \times 4096$ pixels (16 Megapixels) comfortably supports standard consumer and smartphone photography while neutralizing malicious gigapixel decompression bombs.
+
+
 
 
 

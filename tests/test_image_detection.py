@@ -1,12 +1,34 @@
 """
 Tests for Image Detection API Route (/api/detect/image).
 """
+import base64
 import io
 import os
+from unittest.mock import patch
+import cv2
+import numpy as np
 import pytest
 from werkzeug.security import generate_password_hash
 from backend.database.db import db
 from backend.database.models import User, Scan, ScanResult
+
+def make_test_jpeg(width: int, height: int, color=(128, 128, 128)) -> io.BytesIO:
+    """Creates a synthetic in-memory JPEG image with specified dimensions."""
+    arr = np.full((height, width, 3), color, dtype=np.uint8)
+    success, buf = cv2.imencode(".jpg", arr)
+    assert success, f"Failed to encode test image of dimensions {width}x{height}"
+    return io.BytesIO(buf.tobytes())
+
+def decode_base64_jpeg(data_url: str):
+    """Decodes a Base64 data URL into an OpenCV image matrix."""
+    prefix = "data:image/jpeg;base64,"
+    assert data_url.startswith(prefix), f"Expected prefix {prefix}"
+    b64_str = data_url[len(prefix):]
+    raw_bytes = base64.b64decode(b64_str)
+    arr = np.frombuffer(raw_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    assert img is not None, "Failed to decode Base64 JPEG into OpenCV matrix"
+    return img
 
 @pytest.fixture(autouse=True)
 def clean_db(app):
@@ -155,3 +177,146 @@ def test_detect_image_corrupt_content(client, auth_headers):
     json_data = response.get_json()
     assert json_data["success"] is False
     assert json_data["error_code"] == "PROCESSING_ERROR"
+
+def test_detect_image_width_exceeding_maximum_rejected_400(client, auth_headers, app):
+    """Verify image with width > 4096 is rejected with 400 PROCESSING_ERROR and no scan persisted."""
+    img_io = make_test_jpeg(width=5000, height=1000)
+    data = {
+        "image": (img_io, "wide_oversized.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+    assert "exceed maximum permitted limits" in json_data["message"]
+
+    with app.app_context():
+        assert db.session.query(Scan).count() == 0
+        assert db.session.query(ScanResult).count() == 0
+
+def test_detect_image_height_exceeding_maximum_rejected_400(client, auth_headers, app):
+    """Verify image with height > 4096 is rejected with 400 PROCESSING_ERROR and no scan persisted."""
+    img_io = make_test_jpeg(width=1000, height=5000)
+    data = {
+        "image": (img_io, "tall_oversized.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+    assert "exceed maximum permitted limits" in json_data["message"]
+
+    with app.app_context():
+        assert db.session.query(Scan).count() == 0
+        assert db.session.query(ScanResult).count() == 0
+
+def test_detect_image_pixel_count_exceeding_maximum_rejected_400(client, auth_headers, app):
+    """Verify image exceeding total pixel limit is rejected independently of individual dimensions."""
+    # Under a 500k pixel policy, an 800x800 image has w=800 <= 4096 and h=800 <= 4096, but 640k pixels > 500k
+    with patch("backend.services.image_service.MAX_IMAGE_PIXELS", 500_000):
+        img_io = make_test_jpeg(width=800, height=800)
+        data = {
+            "image": (img_io, "pixel_oversized.jpg")
+        }
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+        assert response.status_code == 400
+        json_data = response.get_json()
+        assert json_data["success"] is False
+        assert json_data["error_code"] == "PROCESSING_ERROR"
+        assert "exceed maximum permitted limits" in json_data["message"]
+
+        with app.app_context():
+            assert db.session.query(Scan).count() == 0
+            assert db.session.query(ScanResult).count() == 0
+
+def test_detect_image_boundary_case_permitted(client, auth_headers, app):
+    """Verify image exactly at maximum width boundary (4096x16) is accepted and processed."""
+    img_io = make_test_jpeg(width=4096, height=16)
+    data = {
+        "image": (img_io, "boundary_image.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    assert json_data["data"]["image_dimensions"] == {"width": 4096, "height": 16}
+
+    # Verify heatmap preview is downscaled to thumbnail representation
+    thumb = decode_base64_jpeg(json_data["data"]["heatmap_preview"])
+    assert thumb.shape[1] == 512
+    assert thumb.shape[0] == 2  # 16 * (512 / 4096) = 2
+
+    with app.app_context():
+        assert db.session.query(Scan).count() == 1
+        assert db.session.query(ScanResult).count() == 1
+
+def test_detect_image_heatmap_thumbnail_dimensions_downscaled(client, auth_headers):
+    """Verify large image heatmap preview is downscaled to max 512px maintaining aspect ratio."""
+    # 1000 x 600 -> downscaled to 512 x 307
+    img_io = make_test_jpeg(width=1000, height=600)
+    data = {
+        "image": (img_io, "large_photo.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    # image_dimensions preserves original input dimensions
+    assert json_data["data"]["image_dimensions"] == {"width": 1000, "height": 600}
+
+    # Decoded heatmap preview must be thumbnail sized
+    thumb = decode_base64_jpeg(json_data["data"]["heatmap_preview"])
+    assert thumb.shape[1] == 512  # width downscaled from 1000 to 512
+    assert thumb.shape[0] == 307  # height downscaled from 600 to 307
+    assert thumb.shape[1] <= 512
+    assert thumb.shape[0] <= 512
+
+def test_detect_image_heatmap_small_source_not_upscaled(client, auth_headers):
+    """Verify small image heatmap preview is not upscaled beyond original dimensions."""
+    # 200 x 150 -> max_dim 200 <= 512, should remain 200 x 150
+    img_io = make_test_jpeg(width=200, height=150)
+    data = {
+        "image": (img_io, "small_icon.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    assert json_data["data"]["image_dimensions"] == {"width": 200, "height": 150}
+
+    thumb = decode_base64_jpeg(json_data["data"]["heatmap_preview"])
+    assert thumb.shape[1] == 200
+    assert thumb.shape[0] == 150
+

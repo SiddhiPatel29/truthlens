@@ -98,3 +98,21 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
   Automated test `tests/test_text_detection.py::test_detect_text_non_string_type` passed with HTTP 400 and `INVALID_INPUT`.
 - **Status**:
   Fixed.
+
+---
+
+## Bug 6: Unbounded Image Dimension Decompression Bomb Vulnerability (SEC-01)
+
+- **Problem**:
+  `ImageDetectionService.analyze_image()` decoded raw image bytes without dimension constraints. Allocating full-resolution float32 masks (`np.zeros((h, w), dtype=np.float32)`) on maliciously crafted images with extreme dimensions (e.g. $30,000 \times 30,000$ pixels) triggered gigabyte-scale memory spikes (> 10 GB), causing instant process termination via the operating system Out-Of-Memory (OOM) killer.
+- **Cause**:
+  Absence of post-decode dimension and pixel count bounds checking prior to mask allocation and Gaussian blur convolutions.
+- **Location**:
+  `backend/services/image_service.py`
+- **Fix**:
+  Introduced `MAX_IMAGE_WIDTH = 4096`, `MAX_IMAGE_HEIGHT = 4096`, and `MAX_IMAGE_PIXELS = 16_777_216`. Immediately after `cv2.imdecode()`, dimensions are validated against policy. If exceeded, `ValueError` is raised, returning HTTP 400 `PROCESSING_ERROR` without creating or persisting a `Scan` record. Additionally downscaled heatmap previews to max dimension 512 px.
+- **Verification**:
+  Automated tests in `tests/test_image_detection.py` and `tests/test_image_persistence.py` verify that oversized width, height, and pixel counts return HTTP 400 and persist zero database records.
+- **Status**:
+  Fixed.
+

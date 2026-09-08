@@ -132,10 +132,21 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Created `tests/test_scan_history.py` with 20 comprehensive tests.
    - Total test suite expanded to **190 passed tests in 26.01s**.
 
+### Phase 5: Media Security Hardening & Integrity (In Progress)
+1. **Read-Only Media Security Audit (Step 1)**:
+   - Completed professional read-only security audit across image, video, and audio ingestion pipelines (identified decompression bomb OOM vulnerability, Windows video temporary file lock leaks, and audio synthetic noise fallback).
+2. **Image Resource Bounds & Heatmap Thumbnail Downscaling (Step 2)**:
+   - Enforced image dimension and pixel safety bounds (`MAX_IMAGE_WIDTH = 4096`, `MAX_IMAGE_HEIGHT = 4096`, `MAX_IMAGE_PIXELS = 16_777_216`) in `ImageDetectionService.analyze_image()` immediately after `cv2.imdecode()` and prior to any float32 mask allocation or Gaussian blur convolutions.
+   - Images exceeding limits are rejected immediately with HTTP 400 `PROCESSING_ERROR` and create zero `Scan` or `ScanResult` database records.
+   - Downscaled heatmap preview overlays to max dimension 512 px (using `cv2.INTER_AREA` decimation) while preserving aspect ratio and avoiding upscaling for images smaller than 512 px.
+   - Slashed database `ScanResult.result_data` JSON payload sizes by over 90% for high-resolution images while preserving visual Grad-CAM++ diagnostic utility and full API contract compatibility.
+   - Expanded test suite with 8 new tests across `tests/test_image_detection.py` and `tests/test_image_persistence.py`.
+   - Total test suite expanded to **198 passed tests in 25.21s**.
+
 ---
 
 ## 3. Currently Being Worked On
-- Phase 4 Step 6 (Scan History APIs) is complete and verified with 190/190 tests passing. All Phase 4 persistence and retrieval capabilities are complete. Ready for user commit.
+- Phase 5 Step 2 (Image Resource Bounds + Decompression Bomb Protection + Heatmap Thumbnail Downscaling) is complete and verified with 198/198 tests passing and live in-process verification passed. Ready for user commit.
 
 ---
 
@@ -153,6 +164,7 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Specific Database Error Handling**: Specifically catches `SQLAlchemyError` for session rollback and `ScanDatabaseError`, allowing unexpected programming errors to bubble up naturally.
 - **Authenticated Multimodal Persistence (Text, Image, Video, Audio)**: `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, and `POST /api/detect/audio` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media assets; raw binary files, frames, audio PCM samples, and numpy arrays are excluded from database storage.
 - **User-Scoped Scan History & Anti-IDOR 404**: `GET /api/scans` and `GET /api/scans/<id>` strictly filter by `user_id == g.current_user_id`; unowned scans return 404; list payloads exclude heavy `result_data`.
+- **Image Decompression Bomb & Resource Protection**: Rejects images exceeding 4096x4096px or 16MP before memory-intensive convolutions; downscales previews to 512px thumbnails.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
@@ -160,17 +172,19 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 ## 5. Known Limitations & Remaining Problems
 1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
-3. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening (Phase 5).
-4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
-5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
+3. **Video Cleanup on Windows**: Temporary file descriptors in `video_service.py` need `cap.release()` inside `try...finally` to prevent Windows file lock leaks on error (scheduled for Phase 5 Step 3).
+4. **Audio Decoding Reliability**: `audio_service.py` uses `scipy.io.wavfile` and synthetic noise fallback; needs format integrity hardening (scheduled for Phase 5 Step 4).
+5. **Basic File Validation**: Media validation inspects extensions; binary magic-byte inspection belongs to future security hardening (Phase 5 Step 5).
+6. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+7. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
 ## 6. Recommended Next Backend Task
-Implement **Abuse Report Persistence / Dispatcher Service Database Integration**:
-1. Wire `POST /api/report/abuse` to database persistence via an `AbuseReportService` or `ScanService` extension.
-2. Link dispatched abuse reports to authenticated users (`user_id = g.current_user_id`) and optional parent scans (`scan_id`).
-3. Or proceed to **Phase 5: Media-Security Hardening** (magic-byte inspection, file size validation, antivirus hooks).
+Proceed to **Phase 5 Step 3: Video Temporary File Cleanup Hardening & Resource Limits**:
+1. Enclose `cv2.VideoCapture` lifecycle in a deterministic context manager or `try...finally` to guarantee `cap.release()` executes before `os.remove(temp_path)` on Windows.
+2. Enforce video duration and frame resolution bounds to protect against video decoder resource starvation.
+
 
 
 

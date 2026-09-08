@@ -179,7 +179,7 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
 - **`TextDetectionService`**:
   Calculates sentence burstiness (variance of sentence lengths), type-token lexical diversity, and per-sentence suspicion metrics.
 - **`ImageDetectionService`**:
-  Decodes raw image bytes with OpenCV, computes Laplacian edge/texture variance, generates an activation heatmap mask with a JET colormap overlay, and encodes the resulting visual tamper map into a Base64 JPEG data URL.
+  Decodes raw image bytes with OpenCV, enforces image dimension and pixel safety bounds (`MAX_IMAGE_WIDTH = 4096`, `MAX_IMAGE_HEIGHT = 4096`, `MAX_IMAGE_PIXELS = 16_777_216`) immediately after decoding to prevent decompression bombs, computes Laplacian edge/texture variance, generates an activation heatmap mask with a JET colormap overlay, downscales the overlay to a thumbnail preview (`MAX_PREVIEW_DIMENSION = 512`) preserving aspect ratio, and encodes the resulting visual tamper map into a Base64 JPEG data URL.
 - **`VideoDetectionService`**:
   Streams video frames to a temporary file, samples up to 16 keyframes uniformly, computes frame-level Laplacian anomalies, calculates temporal instability, and renders a Grad-CAM++ style heatmap for the peak anomaly keyframe. Cleans up temporary disk files in a `finally` block.
 - **`AudioDetectionService`**:
