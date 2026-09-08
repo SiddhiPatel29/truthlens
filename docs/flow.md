@@ -746,4 +746,98 @@ Client sends invalid or unhandled request:
 Client receives uniform JSON envelope with exact status code and zero internal info leakage
 ```
 
+---
+
+## 14. Scan History Listing Flow (`GET /api/scans`)
+
+```
+Client HTTP Request: GET /api/scans?page=1&per_page=10&media_type=video
+Headers:
+  Authorization: Bearer <access_token>
+  │
+  ▼
+[backend/app.py: create_app]
+  Flask WSGI router matches prefix '/api' and routes to scan_bp
+  │
+  ▼
+[backend/utils/auth.py: @require_auth]
+  1. Validates Authorization: Bearer <token>
+  2. Verifies signature, expiration, and required claims via AuthService.verify_token()
+  3. Binds authenticated user ID to g.current_user_id
+  │
+  ▼
+[backend/routes/scan_routes.py: list_scans()]
+  1. Parses & validates 'page' (int >= 1; else 400 INVALID_PAGE)
+  2. Parses & validates 'per_page' (int 1-100; else 400 INVALID_PER_PAGE)
+  3. Parses & validates optional 'media_type' against ALLOWED_MEDIA_TYPES (else 400 INVALID_MEDIA_TYPE)
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.get_user_scans()]
+  1. Scopes query strictly to user_id == g.current_user_id
+  2. Eagerly loads 1-to-1 result via joinedload(Scan.result) to avoid N+1 queries
+  3. Applies optional media_type filter
+  4. Calculates total_items and total_pages
+  5. Applies deterministic order_by(Scan.created_at.desc(), Scan.id.desc())
+  6. Applies offset and limit pagination
+  7. Returns { items, pagination: { page, per_page, total_items, total_pages, has_next, has_prev } }
+  │
+  ▼
+[backend/routes/scan_routes.py: list_scans()]
+  Serializes lightweight items:
+  - id, media_type, filename, status, created_at, completed_at
+  - summary result: { id, prediction, confidence, risk_level }
+  - strictly excludes result_data to prevent large Base64 transmission
+  - strictly excludes password_hash and user entity
+  │
+  ▼
+[backend/utils/response.py: api_response()]
+  Returns jsonify({ "success": True, "message": "Scans retrieved successfully.", "data": { "items": [...], "pagination": {...} }, "error_code": None }), 200
+  │
+  ▼
+Client receives HTTP 200 JSON Response with paginated scan summary list
+```
+
+---
+
+## 15. Individual Scan Forensic Detail Flow (`GET /api/scans/<int:scan_id>`)
+
+```
+Client HTTP Request: GET /api/scans/<scan_id>
+Headers:
+  Authorization: Bearer <access_token>
+  │
+  ▼
+[backend/app.py: create_app]
+  Routes to scan_bp
+  │
+  ▼
+[backend/utils/auth.py: @require_auth]
+  Validates Bearer token and binds g.current_user_id
+  │
+  ▼
+[backend/routes/scan_routes.py: get_scan(scan_id)]
+  Calls ScanService.get_user_scan_by_id(user_id=g.current_user_id, scan_id=scan_id)
+  │
+  ▼
+[backend/services/scan_service.py: ScanService.get_user_scan_by_id()]
+  Queries Scan.query.options(joinedload(Scan.result)).filter(Scan.id == scan_id, Scan.user_id == user_id).first()
+  │
+  ▼
+Check Scan existence & ownership:
+  - If scan is None (either does not exist OR belongs to another user):
+      Returns api_response(False, "Scan not found.", None, "SCAN_NOT_FOUND", 404)
+      (Anti-IDOR: never returns 403, preventing ID enumeration)
+  - If scan exists and belongs to g.current_user_id:
+      Serializes full detail payload including complete result_data (heatmap data URLs, breakdown metrics)
+      Strictly omits password_hash and user entity
+  │
+  ▼
+[backend/utils/response.py: api_response()]
+  Returns jsonify({ "success": True, "message": "Scan details retrieved successfully.", "data": scan_detail, "error_code": None }), 200
+  │
+  ▼
+Client receives HTTP 200 JSON Response with full forensic analysis details
+```
+
+
 

@@ -330,6 +330,33 @@ This document records the features implemented during each development phase of 
   - Complete test suite: 170 passed out of 170 tests in 24.75s.
 - **Current Status**: Complete.
 
+---
+
+## 18. User Scan History & Forensic Detail APIs (Phase 4 Step 6)
+- **Status**: Completed (Phase 4 Step 6).
+- **Reason**: Provide authenticated users with paginated, filterable access to their historical forensic scans, as well as single-scan detailed forensic views, with strict server-side user ownership scoping and anti-IDOR protections.
+- **Files Changed / Created**:
+  - `backend/services/scan_service.py` (Modified - added `get_user_scans` with eager loading and `get_user_scan_by_id`)
+  - `backend/routes/scan_routes.py` (New - Blueprint implementing `GET /api/scans` and `GET /api/scans/<int:scan_id>`)
+  - `backend/app.py` (Modified - registered `scan_bp` under `/api` URL prefix)
+  - `tests/test_scan_history.py` (New - 20 comprehensive unit and integration tests)
+- **Implementation**:
+  - `@require_auth`: Protects both endpoints, extracting `user_id` strictly from verified JWT `sub` claims (`g.current_user_id`). Client-supplied `user_id` inputs are completely ignored.
+  - User Ownership Scoping: All database queries filter on `Scan.user_id == g.current_user_id`.
+  - IDOR Protection: Requesting an unowned scan returns HTTP 404 `SCAN_NOT_FOUND` (never 403), preventing scan ID enumeration.
+  - Lightweight List Serialization: `GET /api/scans` returns lightweight summary items (`id`, `media_type`, `filename`, `status`, `created_at`, `completed_at`, and summary `result` fields `id`, `prediction`, `confidence`, `risk_level`), strictly excluding heavy Base64 `result_data`.
+  - Full Forensic Detail: `GET /api/scans/<scan_id>` returns full forensic outcomes including complete `result_data` and heatmap data URLs.
+  - Offset Pagination: Bounded pagination ($1 \le \text{page}$, $1 \le \text{per\_page} \le 100$) with `total_items`, `total_pages`, `has_next`, and `has_prev`.
+  - Media Type Filtering: Optional `?media_type=` in `{"text", "image", "video", "audio"}` with strict 400 rejection of invalid types.
+  - Query Performance: Uses `joinedload(Scan.result)` to eliminate N+1 queries.
+  - Deterministic Ordering: Orders by `Scan.created_at.desc(), Scan.id.desc()`.
+  - Error Sanitization: Catches `ScanDatabaseError` and returns sanitized HTTP 500 without leaking SQL.
+- **Tests**:
+  - `tests/test_scan_history.py` (20 tests passed in 6.03s).
+  - Complete test suite: 190 passed out of 190 tests in 26.01s.
+- **Current Status**: Complete.
+
+
 
 
 

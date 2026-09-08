@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-08
-- **Result Summary**: **170 passed, 0 failed, 0 skipped in 24.75s**
+- **Result Summary**: **190 passed, 0 failed, 0 skipped in 26.01s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -182,13 +182,33 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_audio_persistence.py` | `test_save_scan_result_database_failure_returns_sanitized_500` | DB failure on save_scan_result | **PASSED** | Returned 500 `INTERNAL_SERVER_ERROR` without leaking raw SQL, 0 results |
 | `test_audio_persistence.py` | `test_multiple_authenticated_users_audio_scan_isolation` | Multi-user ownership isolation | **PASSED** | User A and B scans and filenames isolated strictly by user_id |
 | `test_audio_persistence.py` | `test_authentic_audio_prediction_mapping` | Authentic audio prediction mapping | **PASSED** | Correctly maps non-synthetic audio to prediction 'AUTHENTIC' |
+| `test_scan_history.py` | `test_authenticated_empty_history` | Authenticated empty history | **PASSED** | Empty list returned with correct pagination metadata |
+| `test_scan_history.py` | `test_authenticated_history_retrieval_and_ordering` | History retrieval & ordering | **PASSED** | Newest-first ordering, 5 scans retrieved with correct metadata |
+| `test_scan_history.py` | `test_pagination_navigation` | Pagination navigation | **PASSED** | page 1 and page 2 sliced accurately with correct `has_next`/`has_prev` |
+| `test_scan_history.py` | `test_maximum_page_size_boundary` | Maximum per_page boundary | **PASSED** | per_page=100 succeeds (200), per_page=101 rejected (400 `INVALID_PER_PAGE`) |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[page=0-INVALID_PAGE]` | Invalid page param (0) | **PASSED** | Returned 400 `INVALID_PAGE` |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[page=-1-INVALID_PAGE]` | Invalid page param (-1) | **PASSED** | Returned 400 `INVALID_PAGE` |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[page=abc-INVALID_PAGE]` | Non-integer page param | **PASSED** | Returned 400 `INVALID_PAGE` |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[per_page=0-INVALID_PER_PAGE]` | Invalid per_page param (0) | **PASSED** | Returned 400 `INVALID_PER_PAGE` |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[per_page=-5-INVALID_PER_PAGE]` | Invalid per_page param (-5) | **PASSED** | Returned 400 `INVALID_PER_PAGE` |
+| `test_scan_history.py` | `test_invalid_pagination_parameters[per_page=xyz-INVALID_PER_PAGE]` | Non-integer per_page param | **PASSED** | Returned 400 `INVALID_PER_PAGE` |
+| `test_scan_history.py` | `test_media_type_filtering` | Media type filter (?media_type=) | **PASSED** | text/image/video/audio filter strictly; invalid returns 400 `INVALID_MEDIA_TYPE` |
+| `test_scan_history.py` | `test_multi_user_isolation` | Multi-user list isolation | **PASSED** | User A sees only User A scans; User B sees only User B scans |
+| `test_scan_history.py` | `test_idor_prevention_cross_user_access_returns_404` | IDOR prevention on detail endpoint | **PASSED** | Cross-user scan detail request returns 404 `SCAN_NOT_FOUND` (never 403) |
+| `test_scan_history.py` | `test_scan_detail_success` | Detailed scan retrieval | **PASSED** | Returns complete scan & result details including `result_data` |
+| `test_scan_history.py` | `test_missing_scan_detail_returns_404` | Non-existent scan detail | **PASSED** | Returns 404 `SCAN_NOT_FOUND` |
+| `test_scan_history.py` | `test_unauthenticated_requests_fail` | Auth enforcement on list & detail | **PASSED** | Missing token, invalid token, and expired token return 401 |
+| `test_scan_history.py` | `test_list_payload_discipline` | List payload bandwidth discipline | **PASSED** | `result_data` strictly omitted from `/api/scans` list items |
+| `test_scan_history.py` | `test_detail_payload_discipline` | Detail payload sensitivity discipline | **PASSED** | `result_data` present, but `user` object and `password_hash` strictly absent |
+| `test_scan_history.py` | `test_deterministic_ordering_tiebreaker` | Deterministic ordering tiebreaker | **PASSED** | Identical `created_at` records ordered deterministically by `id.desc()` |
+| `test_scan_history.py` | `test_database_failure_returns_sanitized_500` | Database failure sanitization | **PASSED** | SQLAlchemy operational errors caught and returned as sanitized 500 |
 
 ---
 
 ## 2. Live HTTP Server Verification Tests
 
 - **Target Server**: `http://127.0.0.1:5000` (started via `.venv\Scripts\python.exe -m backend.app` / test client)
-- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`)
+- **Execution Method**: Real HTTP requests sent via Python verification scripts (`scratch/verify_live.py`, `scratch/verify_live_auth.py`, `scratch/verify_live_auth_me.py`, `scratch/verify_live_image_persistence.py`, `scratch/verify_live_video_persistence.py`, `scratch/verify_live_audio_persistence.py`, `scratch/verify_live_scan_history.py`)
 - **Result Summary**: All live verification checks passed
 
 | Endpoint / Operation | Method | Payload Type / Headers | Expected Status | Actual Status | Envelope `success` | Result |
@@ -217,6 +237,13 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/auth/me` | GET | `Authorization: Basic ...` | 401 | 401 | False | **PASSED** |
 | `/api/auth/me` | GET | `Authorization: Bearer <valid>` | 200 | 200 | True | **PASSED** |
 | `/api/auth/me` | GET | `Authorization: Bearer <expired>`| 401 | 401 | False | **PASSED** |
+| `/api/scans` | GET | Missing Authorization | 401 | 401 | False | **PASSED** |
+| `/api/scans` | GET | `Authorization: Bearer <valid>` (User A list) | 200 | 200 | True | **PASSED** |
+| `/api/scans?media_type=video` | GET | `Authorization: Bearer <valid>` (Filter) | 200 | 200 | True | **PASSED** |
+| `/api/scans?media_type=invalid` | GET | `Authorization: Bearer <valid>` | 400 | 400 | False | **PASSED** |
+| `/api/scans/<owned_id>` | GET | `Authorization: Bearer <valid>` (User A detail) | 200 | 200 | True | **PASSED** |
+| `/api/scans/<unowned_id>` | GET | `Authorization: Bearer <valid>` (IDOR test) | 404 | 404 | False | **PASSED** |
+| `/api/scans/999999` | GET | `Authorization: Bearer <valid>` (Not found) | 404 | 404 | False | **PASSED** |
 
 ---
 

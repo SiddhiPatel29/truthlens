@@ -119,12 +119,23 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Handled persistence failures cleanly with sanitized HTTP 500 responses without leaking raw SQL.
    - Preserved all response envelope fields and validation behaviors.
    - Created `tests/test_audio_persistence.py` with 11 comprehensive tests.
-   - Total test suite expanded to **170 passed tests in 24.75s**.
+   - Total test suite expanded to 170 passed tests.
+
+6. **Scan History & Forensic Detail APIs (Step 6)**:
+   - Implemented `GET /api/scans` (paginated, filterable user scan history) and `GET /api/scans/<int:scan_id>` (detailed single scan forensic view).
+   - Enforced `@require_auth` across both endpoints; all queries strictly scoped to `g.current_user_id`.
+   - Enforced IDOR protection: requesting an unowned or non-existent scan returns HTTP 404 `SCAN_NOT_FOUND` (never 403), preventing scan ID enumeration.
+   - Implemented payload discipline: list items exclude heavy `result_data` to avoid multi-megabyte Base64 heatmap transmission.
+   - Eagerly loaded 1-to-1 results via `joinedload(Scan.result)` to eliminate N+1 queries.
+   - Bounded offset pagination ($1 \le \text{page}$, $1 \le \text{per\_page} \le 100$) and deterministic ordering (`created_at DESC, id DESC`).
+   - Validated optional `media_type` filter strictly against allowed modalities.
+   - Created `tests/test_scan_history.py` with 20 comprehensive tests.
+   - Total test suite expanded to **190 passed tests in 26.01s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 4 Step 5 (Audio Detection Scan Persistence) is complete and verified with 170/170 tests passing. All four multimodal forensic detection pipelines (text, image, video, audio) are now authenticated and persisted in the relational database. Ready for user commit.
+- Phase 4 Step 6 (Scan History APIs) is complete and verified with 190/190 tests passing. All Phase 4 persistence and retrieval capabilities are complete. Ready for user commit.
 
 ---
 
@@ -141,26 +152,26 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Controlled One-to-One Conflict Rejection**: Proactively raises `ScanConflictError` when attempting to attach a duplicate result to a scan.
 - **Specific Database Error Handling**: Specifically catches `SQLAlchemyError` for session rollback and `ScanDatabaseError`, allowing unexpected programming errors to bubble up naturally.
 - **Authenticated Multimodal Persistence (Text, Image, Video, Audio)**: `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, and `POST /api/detect/audio` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media assets; raw binary files, frames, audio PCM samples, and numpy arrays are excluded from database storage.
+- **User-Scoped Scan History & Anti-IDOR 404**: `GET /api/scans` and `GET /api/scans/<id>` strictly filter by `user_id == g.current_user_id`; unowned scans return 404; list payloads exclude heavy `result_data`.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
 
 ## 5. Known Limitations & Remaining Problems
 1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
-2. **Scan History Endpoints Not Implemented**: Scans and results are persisted in the database, but user-facing scan history/listing APIs (`GET /api/scans`, pagination, details) are not yet implemented.
-3. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
-4. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening (Phase 5).
-5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
-6. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
+2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
+3. **Basic File Validation**: Media validation inspects extensions and sizes; binary magic-byte inspection belongs to future security hardening (Phase 5).
+4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
-## 6. Recommended Next Backend Task (Phase 4 — Step 6)
-Implement **Phase 4 Step 6: Scan History / Listing APIs**:
-1. Implement a user-scoped scan history listing endpoint (`GET /api/scans`) protected by `@require_auth`.
-2. Retrieve persisted scans for `g.current_user_id` ordered by `created_at` descending.
-3. Implement proportional pagination (`page`, `per_page`) and optional modality filtering.
-4. Implement individual scan detail retrieval (`GET /api/scans/<int:scan_id>`) ensuring strict user ownership isolation (404/403 for other users' scans).
+## 6. Recommended Next Backend Task
+Implement **Abuse Report Persistence / Dispatcher Service Database Integration**:
+1. Wire `POST /api/report/abuse` to database persistence via an `AbuseReportService` or `ScanService` extension.
+2. Link dispatched abuse reports to authenticated users (`user_id = g.current_user_id`) and optional parent scans (`scan_id`).
+3. Or proceed to **Phase 5: Media-Security Hardening** (magic-byte inspection, file size validation, antivirus hooks).
+
 
 
 

@@ -830,7 +830,250 @@ None.
 
 ---
 
-## 10. Global Framework Errors
+## 10. User Scan History Listing
+
+- **Method**: `GET`
+- **Path**: `/api/scans`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Service Called**: `ScanService.get_user_scans`
+- **Ownership**: Strictly scoped to `g.current_user_id`. Users can only retrieve their own scans.
+- **Request Headers**:
+  - `Authorization`: `Bearer <token>`
+- **Query Parameters**:
+  - `page` (integer, optional, default `1`): Page number, must be >= 1.
+  - `per_page` (integer, optional, default `10`): Items per page, must be >= 1 and <= 100.
+  - `media_type` (string, optional): Filter by modality: `text`, `image`, `video`, or `audio` (case-insensitive).
+- **Request Body**: None
+
+### Validation Rules
+1. Must contain valid Bearer JWT in `Authorization` header.
+2. `page` must be an integer >= 1. Non-integer or < 1 returns HTTP 400 with `INVALID_PAGE`.
+3. `per_page` must be an integer between 1 and 100. Values < 1 or > 100 return HTTP 400 with `INVALID_PER_PAGE`.
+4. `media_type`, if supplied, must be one of `{"text", "image", "video", "audio"}`. Other values return HTTP 400 with `INVALID_MEDIA_TYPE`.
+
+### Payload Discipline
+- Returns lightweight scan summary items.
+- Eagerly loads `ScanResult` summary fields: `id`, `prediction`, `confidence`, `risk_level`.
+- **`result_data` is strictly excluded** from the list response to prevent bandwidth inflation from Base64 heatmaps.
+- `Scan.user`, `password_hash`, and raw media are never serialized.
+
+### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Scans retrieved successfully.",
+  "data": {
+    "items": [
+      {
+        "id": 14,
+        "media_type": "video",
+        "filename": "interview_clip.mp4",
+        "status": "COMPLETED",
+        "created_at": "2026-09-08T16:30:15Z",
+        "completed_at": "2026-09-08T16:30:18Z",
+        "result": {
+          "id": 12,
+          "prediction": "DEEPFAKE",
+          "confidence": 0.842,
+          "risk_level": "HIGH"
+        }
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "per_page": 10,
+      "total_items": 1,
+      "total_pages": 1,
+      "has_next": false,
+      "has_prev": false
+    }
+  },
+  "error_code": null
+}
+```
+
+### Empty List Response (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Scans retrieved successfully.",
+  "data": {
+    "items": [],
+    "pagination": {
+      "page": 1,
+      "per_page": 10,
+      "total_items": 0,
+      "total_pages": 0,
+      "has_next": false,
+      "has_prev": false
+    }
+  },
+  "error_code": null
+}
+```
+
+### Error Responses
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
+- **Invalid page parameter (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Query parameter 'page' must be an integer greater than or equal to 1.",
+    "data": null,
+    "error_code": "INVALID_PAGE"
+  }
+  ```
+- **Invalid per_page parameter (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Query parameter 'per_page' must be an integer between 1 and 100.",
+    "data": null,
+    "error_code": "INVALID_PER_PAGE"
+  }
+  ```
+- **Invalid media_type parameter (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid media_type 'hologram'. Allowed values are: audio, image, text, video.",
+    "data": null,
+    "error_code": "INVALID_MEDIA_TYPE"
+  }
+  ```
+- **Internal Database Error (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while retrieving scans.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
+  }
+  ```
+
+---
+
+## 11. Individual Scan Forensic Detail
+
+- **Method**: `GET`
+- **Path**: `/api/scans/<int:scan_id>`
+- **Authentication**: Required (`Authorization: Bearer <access_token>`) via `@require_auth`
+- **Service Called**: `ScanService.get_user_scan_by_id`
+- **Ownership & IDOR Protection**: Scoped to both `Scan.id == scan_id` AND `Scan.user_id == g.current_user_id`.
+- **Anti-Enumeration Invariant**: If `scan_id` does not exist OR belongs to another user, returns HTTP 404 (`SCAN_NOT_FOUND`). It never returns 403.
+- **Request Headers**:
+  - `Authorization`: `Bearer <token>`
+- **Request Body**: None
+
+### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "message": "Scan details retrieved successfully.",
+  "data": {
+    "id": 14,
+    "user_id": 1,
+    "media_type": "image",
+    "filename": "suspect_profile.jpg",
+    "status": "COMPLETED",
+    "created_at": "2026-09-08T16:30:15Z",
+    "completed_at": "2026-09-08T16:30:18Z",
+    "result": {
+      "id": 12,
+      "scan_id": 14,
+      "prediction": "DEEPFAKE",
+      "confidence": 0.842,
+      "risk_level": "HIGH",
+      "created_at": "2026-09-08T16:30:18Z",
+      "result_data": {
+        "is_deepfake": true,
+        "confidence_score": 0.842,
+        "manipulation_type": "Face-Swap / Boundary Anomaly",
+        "image_dimensions": { "width": 640, "height": 480 },
+        "heatmap_preview": "data:image/jpeg;base64,..."
+      }
+    }
+  },
+  "error_code": null
+}
+```
+
+### Error Responses
+- **Scan Not Found or Belongs to Another User (`404 Not Found`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Scan not found.",
+    "data": null,
+    "error_code": "SCAN_NOT_FOUND"
+  }
+  ```
+- **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication required.",
+    "data": null,
+    "error_code": "AUTHENTICATION_REQUIRED"
+  }
+  ```
+- **Expired JWT access token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Authentication token has expired.",
+    "data": null,
+    "error_code": "TOKEN_EXPIRED"
+  }
+  ```
+- **Invalid or malformed JWT token (`401 Unauthorized`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Invalid authentication token.",
+    "data": null,
+    "error_code": "INVALID_TOKEN"
+  }
+  ```
+- **Internal Database Error (`500 Internal Server Error`)**:
+  ```json
+  {
+    "success": false,
+    "message": "An error occurred while retrieving scan details.",
+    "data": null,
+    "error_code": "INTERNAL_SERVER_ERROR"
+  }
+  ```
+
+---
+
+## 12. Global Framework Errors
 
 | HTTP Status | Error Code | Example Trigger | Message |
 | :--- | :--- | :--- | :--- |
@@ -840,5 +1083,6 @@ None.
 | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | `GET /api/detect/text` | `"The HTTP method is not allowed for this endpoint."` |
 | `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | File upload > 50 MB | `"Request payload exceeds maximum permitted file size."` |
 | `500 Internal Server Error` | `INTERNAL_SERVER_ERROR` | Unhandled server exception | `"An unexpected internal server error occurred."` |
+
 
 

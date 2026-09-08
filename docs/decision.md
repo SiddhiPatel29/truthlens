@@ -507,6 +507,34 @@ Connect `POST /api/detect/audio` to `@require_auth` and `ScanService`, persistin
 5. **Completion of All Four Forensic Modalities**:
    With Phase 4 Step 5 complete, all four multimodal forensic detection pipelines (text, image, video, and audio) now consistently require JWT authentication and persist structured scan records and forensic results via `ScanService`. Only abuse reporting remains unpersisted at this stage.
 
+---
+
+## Decision 23: Scan History APIs, User Ownership Scoping, Anti-IDOR 404, and Lightweight List Serialization (Phase 4 Step 6)
+
+### Decision
+Implement user-scoped scan history listing (`GET /api/scans`) and individual scan detail retrieval (`GET /api/scans/<int:scan_id>`) protected by `@require_auth`. All queries are strictly scoped to `g.current_user_id`. Requests for non-existent or unowned scans return HTTP 404 `SCAN_NOT_FOUND`. The list endpoint returns lightweight scan metadata excluding heavy `result_data`, while the detail endpoint returns full forensic metrics.
+
+### Reasons & Architectural Principles
+
+1. **Strict User Ownership Scoping**:
+   Users must only access scans they own. All database queries in `ScanService.get_user_scans` and `ScanService.get_user_scan_by_id` explicitly filter on `Scan.user_id == user_id`. The user ID is extracted directly from the verified JWT access token (`g.current_user_id`), never from client-supplied request bodies, query parameters, or path segments.
+
+2. **Anti-Enumeration 404 for IDOR Prevention**:
+   If an authenticated user attempts to access `GET /api/scans/<scan_id>` for a scan owned by someone else, the application returns HTTP 404 (`SCAN_NOT_FOUND`) rather than HTTP 403 (`FORBIDDEN`). Returning 403 would reveal that the scan ID exists in the database, allowing an attacker to enumerate valid resource IDs. Returning 404 makes unowned scans indistinguishable from non-existent scans.
+
+3. **Lightweight List Payload Discipline**:
+   Image and video detection scans persist Base64-encoded JPEG heatmap overlays (`heatmap_preview`, `keyframe_heatmap_preview`) inside `ScanResult.result_data`, which can reach 20 KB to 100 KB+ per scan. Serializing `result_data` in history listings would inflate a 20-item response to several megabytes, degrading network performance and UI rendering. Therefore, `GET /api/scans` returns only top-level verdict summaries (`prediction`, `confidence`, `risk_level`), while full `result_data` is reserved exclusively for single-record detail inspection (`GET /api/scans/<scan_id>`).
+
+4. **Offset Pagination with Strict Upper Bounds**:
+   For forensic audit logs, users need total scan counts, total pages, and direct page navigation controls. Offset pagination (`page`, `per_page`) is predictable, robust, and supported natively. To prevent denial-of-service memory exhaustion, `per_page` is capped at 100, and non-positive or malformed parameters are rejected with HTTP 400 (`INVALID_PAGE`, `INVALID_PER_PAGE`).
+
+5. **Deterministic Ordering**:
+   Scans are ordered by `Scan.created_at.desc(), Scan.id.desc()`. The secondary sort on primary key `id.desc()` breaks ties when scans have identical timestamps, ensuring stable pagination boundaries without item duplication or drift across pages.
+
+6. **Eager Loading (N+1 Query Elimination)**:
+   To prevent executing individual SQL queries for each scan's 1-to-1 `ScanResult` relation, queries utilize `options(joinedload(Scan.result))` to fetch parent and child entities in a single SQL query with outer join.
+
+
 
 
 

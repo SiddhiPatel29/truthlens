@@ -27,7 +27,8 @@ truthlens/
 │   │   ├── video_routes.py     # POST /api/detect/video
 │   │   ├── audio_routes.py     # POST /api/detect/audio
 │   │   ├── abuse_routes.py     # POST /api/report/abuse
-│   │   └── auth_routes.py      # POST /api/auth/register, POST /api/auth/login, GET /api/auth/me
+│   │   ├── auth_routes.py      # POST /api/auth/register, POST /api/auth/login, GET /api/auth/me
+│   │   └── scan_routes.py      # GET /api/scans, GET /api/scans/<int:scan_id>
 │   ├── services/               # Pure forensic and business logic (no Flask request dependencies)
 │   │   ├── text_service.py     # Text burstiness, perplexity, and repetition heuristics
 │   │   ├── image_service.py    # Laplacian variance, Grad-CAM++ heatmap simulation (OpenCV)
@@ -63,7 +64,8 @@ truthlens/
 │   ├── test_text_persistence.py # Text detection scan persistence and user isolation tests
 │   ├── test_image_persistence.py # Image detection scan persistence and user isolation tests
 │   ├── test_video_persistence.py # Video detection scan persistence and user isolation tests
-│   └── test_audio_persistence.py # Audio detection scan persistence and user isolation tests
+│   ├── test_audio_persistence.py # Audio detection scan persistence and user isolation tests
+│   └── test_scan_history.py     # User scan history listing, detail, pagination, and IDOR tests
 ├── .env.example                # Safe environment configuration template
 ├── requirements.txt            # Pinned production, database, and test dependencies
 └── test.{jpg,mp4,wav}          # Local multimodal test media assets
@@ -81,7 +83,7 @@ truthlens/
   4. Initializes the database layer (`db.init_app(app)`) and migration engine (`migrate.init_app(app, db)`).
   5. Binds Cross-Origin Resource Sharing (`CORS`) with `supports_credentials=True` restricted to `CLIENT_ORIGIN`.
   6. Registers centralized error handlers (`register_error_handlers(app)`).
-  7. Mounts modular route Blueprints (`health_bp`, `text_bp`, `image_bp`, `video_bp`, `audio_bp`, `abuse_bp`) under the common URL prefix `/api`.
+  7. Mounts modular route Blueprints (`health_bp`, `text_bp`, `image_bp`, `video_bp`, `audio_bp`, `abuse_bp`, `auth_bp`, `scan_bp`) under the common URL prefix `/api`.
   8. When executed directly (`python -m backend.app`), starts the WSGI development server on the configured port.
 
 ---
@@ -162,10 +164,11 @@ The persistence layer is encapsulated in `backend/database/` using Flask-SQLAlch
 All API endpoints are defined inside isolated Flask Blueprints within `backend/routes/`:
 - Every route handler is responsible solely for:
   - Parsing incoming HTTP requests (extracting JSON body or `multipart/form-data` files).
-  - Executing input validation (validating required fields, data types, file extensions).
-  - Enforcing authorization where required (e.g. `@require_auth` on `GET /api/auth/me`, `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, and `POST /api/detect/audio`).
+  - Executing input validation (validating required fields, data types, file extensions, query parameters).
+  - Enforcing authorization where required (e.g. `@require_auth` on `GET /api/auth/me`, `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, `POST /api/detect/audio`, `GET /api/scans`, and `GET /api/scans/<int:scan_id>`).
   - Calling the corresponding domain service in `backend/services/`.
   - Triggering transactional persistence via `ScanService` for authenticated scan modalities (`POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, `POST /api/detect/audio`). Note: abuse dispatch remains unpersisted in this step.
+  - Exposing user-scoped scan history queries (`GET /api/scans` with offset pagination and media filtering; `GET /api/scans/<scan_id>` with 404 anti-enumeration IDOR prevention).
   - Wrapping responses and errors inside the standard uniform response envelope via `api_response()`.
   - Logging unexpected exceptions using Python's standard `logging` logger without exposing internal details to clients.
 
@@ -186,7 +189,7 @@ The service layer (`backend/services/`) encapsulates all core analysis and foren
 - **`AuthService`**:
   Validates registration parameters, normalizes email addresses (`strip().lower()`), verifies modern password policy (12–128 characters, no mandatory composition rules, whitespace/Unicode allowed, local weak-password blocklist), performs duplicate email checks, hashes passwords securely using Werkzeug's `generate_password_hash` (`scrypt`), and persists `User` records in the database. For login, verifies credentials via `check_password_hash`, enforces account active status, prevents user enumeration with generic 401 errors, and issues signed HS256 JWT access tokens with minimal claims (`sub`, `iat`, `exp`).
 - **`ScanService`**:
-  Encapsulates database persistence and query operations for forensic scans (`Scan`) and completed analysis results (`ScanResult`). Handles atomic transactions, transitions parent scan status from `PENDING` to `COMPLETED` with UTC timestamps, enforces 1-to-1 scan-to-result integrity (`ScanConflictError`), performs proportional input validation, and manages session rollback on database commit errors (`ScanDatabaseError`).
+  Encapsulates database persistence and query operations for forensic scans (`Scan`) and completed analysis results (`ScanResult`). Handles atomic transactions, transitions parent scan status from `PENDING` to `COMPLETED` with UTC timestamps, enforces 1-to-1 scan-to-result integrity (`ScanConflictError`), performs proportional input validation, manages session rollback on database commit errors (`ScanDatabaseError`), provides user-scoped paginated history (`get_user_scans`) with eager-loaded results and deterministic sorting, and ensures strict user ownership on single scan retrieval (`get_user_scan_by_id`).
 
 ---
 

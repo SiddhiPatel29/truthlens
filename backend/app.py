@@ -14,6 +14,7 @@ from backend.routes.video_routes import video_bp
 from backend.routes.audio_routes import audio_bp
 from backend.routes.abuse_routes import abuse_bp
 from backend.routes.auth_routes import auth_bp
+from backend.routes.scan_routes import scan_bp
 
 def configure_logging(app: Flask):
     """Configures structured server-side logging."""
@@ -53,6 +54,7 @@ def create_app(config_class=Config):
     app.register_blueprint(audio_bp, url_prefix="/api")
     app.register_blueprint(abuse_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api")
+    app.register_blueprint(scan_bp, url_prefix="/api")
 
     return app
 
