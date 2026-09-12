@@ -157,11 +157,25 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Enforced the persistence invariant: every rejected audio upload creates exactly 0 `Scan` and 0 `ScanResult` database records.
    - Added 20 new automated tests (10 in `tests/test_audio_detection.py`, 10 in `tests/test_audio_persistence.py`).
    - Total test suite expanded to **234 passed tests in 51.27s**.
+5. **Magic-Byte Signature Validation & Filename Security Hardening (Step 5)**:
+   - Implemented bounded 32-byte header inspection with deterministic `finally: stream.seek(pos)` rewinding in `read_file_prefix`.
+   - Added container signature checks for JPEG, PNG, WebP, MP4, MOV (conservative ISOBMFF `ftyp` box at bytes 4..8), AVI, MKV, and WAV.
+   - Added `is_safe_filename` rejecting path separators (`/`, `\`), Windows drive letters/colons (`:`), control/null characters, dot directory navigation (`.`, `..`), and names > 255 chars, while accepting valid double dots (`audit..v1.jpg`), spaces, and Unicode.
+   - Standardized error codes: `INVALID_FILE` for filename issues, `INVALID_FORMAT` for disallowed extension or signature mismatch.
+   - Total test suite expanded to **309 passed tests in 83.47s**.
+6. **Multi-Modal Resource Bounds & Forensic Payload Hardening (Step 6)**:
+   - Defined authoritative `MAX_TEXT_LENGTH = 25_000` constant in `text_service.py` and enforced upfront in `text_routes.py`, rejecting text > 25,000 characters with HTTP 400 `TEXT_TOO_LONG` before database scan creation.
+   - Analyzed complete accepted text for statistical metrics (`total_sentences`, `total_words`, `burstiness_index`, `lexical_diversity`, `ai_probability`), but capped persisted `sentence_breakdown` at `MAX_SENTENCE_BREAKDOWN_ITEMS = 100` entries to prevent database payload bloat.
+   - Enforced `MAX_PREVIEW_DIMENSION = 512` thumbnail downscaling on video keyframe heatmap overlay using `cv2.INTER_AREA` before JPEG Base64 encoding, slashing payload from ~2.5MB down to ~30–60KB while keeping detection frames at original resolution.
+   - Enforced `MAX_AUDIO_DURATION_SECONDS = 120` in `AudioDetectionService.analyze_audio()`, aligning with video duration limits; audio > 120s is cleanly rejected with HTTP 400 `PROCESSING_ERROR` before persistence.
+   - Guaranteed zero-scan persistence invariants across all modalities on out-of-bounds rejections.
+   - Added 13 new automated tests across text, video, and audio suites.
+   - Total test suite expanded to **322 passed tests in 67.88s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 5 Step 4 (Audio Decoding & Format Integrity Hardening) is complete and verified with 234/234 tests passing and live in-process verification passed. Ready for user commit.
+- Phase 5 Step 6 (Multi-Modal Resource Bounds & Forensic Payload Hardening) is complete and verified with 322/322 tests passing and live in-process verification passed. Ready for user commit.
 
 ---
 
@@ -180,9 +194,10 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Authenticated Multimodal Persistence (Text, Image, Video, Audio)**: `POST /api/detect/text`, `POST /api/detect/image`, `POST /api/detect/video`, and `POST /api/detect/audio` require Bearer JWT; scans are owned by authenticated users; original uploaded filename metadata is recorded for media assets; raw binary files, frames, audio PCM samples, and numpy arrays are excluded from database storage.
 - **User-Scoped Scan History & Anti-IDOR 404**: `GET /api/scans` and `GET /api/scans/<id>` strictly filter by `user_id == g.current_user_id`; unowned scans return 404; list payloads exclude heavy `result_data`.
 - **Image Decompression Bomb & Resource Protection**: Rejects images exceeding 4096x4096px or 16MP before memory-intensive convolutions; downscales previews to 512px thumbnails.
-- **Video Resource Bounds & Deterministic Windows Cleanup**: Enforces duration limits (120s), resolution bounds (4096x4096px / 16MP), and guarantees `cap.release()` before `os.remove(temp_path)` in `finally:`, eliminating Windows file handle lock leaks (`WinError 32`).
-- **Audio Integrity & Elimination of Fabricated Forensics**: Replaces synthetic Gaussian noise fallbacks with clean `ValueError` propagation; adopts Option A WAV-only policy for `scipy.io.wavfile.read()`; validates buffer sample size and rate; enforces deterministic tempfile deletion; guarantees 0 scans persisted on rejected uploads.
+- **Video Resource Bounds & Deterministic Windows Cleanup**: Enforces duration limits (120s), resolution bounds (4096x4096px / 16MP), downscales keyframe preview to 512px, and guarantees `cap.release()` before `os.remove(temp_path)` in `finally:`, eliminating Windows file handle lock leaks (`WinError 32`).
+- **Audio Integrity & Duration Limits**: Replaces synthetic Gaussian noise fallbacks with clean `ValueError` propagation; adopts Option A WAV-only policy for `scipy.io.wavfile.read()`; validates buffer sample size, rate, and duration (120s); enforces deterministic tempfile deletion; guarantees 0 scans persisted on rejected uploads.
 - **Magic-Byte Signature Validation & Filename Security (SEC-04)**: Inspects bounded 32-byte stream prefixes with deterministic `finally: stream.seek(pos)` rewinding; verifies container headers (JPEG, PNG, WebP, MP4, MOV with conservative `ftyp`, AVI, MKV, WAV); blocks path traversal (`/`, `\`), Windows drive letters (`:`), control characters, and dot directory navigation while permitting legitimate double-dot basenames (`audit..v1.jpg`), spaces, and Unicode.
+- **Text Resource Bounds & Payload Discipline (SEC-05)**: Enforces authoritative `MAX_TEXT_LENGTH = 25_000` (HTTP 400 `TEXT_TOO_LONG`), analyzes complete text, and caps `sentence_breakdown` at 100 entries to prevent database storage explosion.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
@@ -197,12 +212,4 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 ---
 
 ## 6. Recommended Next Backend Task
-Phase 5 Step 5 (File format / magic-byte validation + filename security) is complete with 309 automated tests passing.
-Proceed to the next security audit or hardening item on the Phase 5 roadmap (e.g., Rate Limiting & Abuse Prevention, Request Payload Limits, or Phase 6 Abuse Reporting Persistence).
-
-
-
-
-
-
 

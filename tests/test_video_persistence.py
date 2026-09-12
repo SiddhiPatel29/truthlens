@@ -787,3 +787,64 @@ def test_video_double_dot_filename_persists_scan(client, app, real_video_path, a
         assert scan.result is not None
 
 
+def test_video_persistence_records_downscaled_keyframe_thumbnail(client, app, real_video_path, auth_headers_a, auth_user_a):
+    """
+    15. Verify that a video scan with high-resolution frames persists
+        a downscaled (<= 512px) thumbnail preview in ScanResult.result_data.
+    """
+    import base64
+    import numpy as np
+
+    class HighResVideoCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+        def isOpened(self):
+            return True
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_COUNT:
+                return 30
+            if prop == cv2.CAP_PROP_FPS:
+                return 30.0
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return 1920
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return 1080
+            return 0
+        def set(self, prop, val):
+            pass
+        def read(self):
+            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            cv2.circle(frame, (960, 540), 200, (255, 255, 255), -1)
+            return True, frame
+        def release(self):
+            pass
+
+    with patch("cv2.VideoCapture", side_effect=HighResVideoCapture):
+        with open(real_video_path, "rb") as vid_file:
+            response = client.post(
+                "/api/detect/video",
+                data={"video": (vid_file, "hd_clip.mp4")},
+                content_type="multipart/form-data",
+                headers=auth_headers_a
+            )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        scan = Scan.query.filter_by(user_id=auth_user_a["id"]).first()
+        assert scan is not None
+        assert scan.result is not None
+        preview_b64 = scan.result.result_data.get("keyframe_heatmap_preview")
+        assert preview_b64 is not None
+        assert preview_b64.startswith("data:image/jpeg;base64,")
+
+        raw_b64 = preview_b64.split(",", 1)[1]
+        img_bytes = base64.b64decode(raw_b64)
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        thumb = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        assert thumb is not None
+        assert max(thumb.shape[:2]) <= 512
+        # 1920 x 1080 -> 512 x 288
+        assert thumb.shape[1] == 512
+        assert thumb.shape[0] == 288

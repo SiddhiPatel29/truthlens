@@ -218,6 +218,36 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
 - **Status**:
   Fixed.
 
+---
 
+## Bug 10: Multi-Modal Resource Inconsistencies & Unbounded Forensic Payload Ingestion (SEC-05, SEC-06, SEC-07)
 
-
+- **Problem**:
+  1. **SEC-05**: `POST /api/detect/text` lacked an upper bound on input length. With the server's global `MAX_CONTENT_LENGTH = 50MB`, an authenticated client could submit tens of thousands of sentences. Regex splitting (`re.split`) consumed significant CPU, and constructing `sentence_results` generated an unbounded list of dictionaries persisted into `ScanResult.result_data` JSON column, causing memory spikes and SQLite storage bloat.
+  2. **SEC-06**: While Phase 5 Step 2 downscaled image heatmap overlays to 512px thumbnails, Phase 5 Step 3 omitted thumbnail downscaling for video keyframe overlays. High-resolution (up to 4096x4096px / 16MP) video frames were encoded at full resolution into Base64 JPEG, bloating `ScanResult.result_data` by 1.5MB–2.5MB on every video scan.
+  3. **SEC-07**: While video detection enforced `MAX_VIDEO_DURATION_SECONDS = 120`, audio detection had no duration ceiling (`MAX_AUDIO_DURATION_SECONDS`), creating a policy inconsistency and allowing arbitrarily long audio files within the 50MB file limit to be processed through float32 NumPy operations without a duration check.
+- **Cause**:
+  1. Omission of maximum character length check and sentence breakdown list slicing in text detection.
+  2. Missing `MAX_PREVIEW_DIMENSION = 512` resize step on video keyframe `overlay`.
+  3. Missing `duration_sec > MAX_AUDIO_DURATION_SECONDS` validation check in audio detection.
+- **Location**:
+  - `backend/services/text_service.py`
+  - `backend/routes/text_routes.py`
+  - `backend/services/video_service.py`
+  - `backend/services/audio_service.py`
+- **Fix**:
+  1. Enforced authoritative `MAX_TEXT_LENGTH = 25_000` in `text_service.py` and `text_routes.py`, returning HTTP 400 `TEXT_TOO_LONG` before database scan creation. Sliced `sentence_breakdown` to `MAX_SENTENCE_BREAKDOWN_ITEMS = 100` entries while calculating global metrics over the complete accepted text. Documented that `sentence_breakdown` is capped.
+  2. Enforced `MAX_PREVIEW_DIMENSION = 512` thumbnail downscaling using `cv2.INTER_AREA` on video keyframe overlay before JPEG Base64 encoding. Preserved detection frame resolution untouched.
+  3. Enforced `MAX_AUDIO_DURATION_SECONDS = 120` in `AudioDetectionService.analyze_audio()`, rejecting oversized audio with HTTP 400 `PROCESSING_ERROR` before database persistence and cleaning up temp files in `finally:`.
+  4. Guaranteed persistence invariants: all rejections return HTTP 400 and create exactly 0 `Scan` and 0 `ScanResult` database records.
+- **Verification**:
+  - `tests/test_text_detection.py`: 4 tests for `TEXT_TOO_LONG`, 25,000 char boundary, and 100-sentence capping.
+  - `tests/test_text_persistence.py`: 2 tests for zero scans on `TEXT_TOO_LONG` and persisted breakdown capping.
+  - `tests/test_video_detection.py`: 2 tests for 1280x720 downscaling to <= 512px and small video retention.
+  - `tests/test_video_persistence.py`: 1 test verifying persisted thumbnail <= 512px.
+  - `tests/test_audio_detection.py`: 3 tests for audio duration limit (> 120s rejected, 120s boundary accepted, service exception).
+  - `tests/test_audio_persistence.py`: 1 test verifying audio > 120s creates 0 scans.
+  - Live in-process verification script `scratch/verify_live_resource_bounds_and_payloads.py` passed all 7 scenarios.
+  - Full regression test suite: **322 passed out of 322 tests in 67.88s**.
+- **Status**:
+  Fixed.

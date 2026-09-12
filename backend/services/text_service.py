@@ -5,16 +5,27 @@ Calculates synthetic markers (perplexity, sentence burstiness, and repetitive en
 import re
 import math
 
+# Text resource policy constants
+MAX_TEXT_LENGTH = 25_000
+MAX_SENTENCE_BREAKDOWN_ITEMS = 100
+
 class TextDetectionService:
     @staticmethod
     def analyze_text(text: str) -> dict:
         """
         Analyzes text for AI generation markers.
+        Analyzes the complete accepted text, but caps the returned
+        sentence_breakdown at MAX_SENTENCE_BREAKDOWN_ITEMS (100) entries
+        to prevent database payload bloat. As a result, sentence_breakdown
+        may not represent every sentence in long text submissions.
         """
         if not text or not text.strip():
             raise ValueError("Input text cannot be empty.")
 
         cleaned_text = text.strip()
+        if len(cleaned_text) > MAX_TEXT_LENGTH:
+            raise ValueError(f"Input text exceeds maximum permitted length of {MAX_TEXT_LENGTH} characters.")
+
         sentences = re.split(r'(?<=[.!?]) +', cleaned_text)
         sentences = [s.strip() for s in sentences if s.strip()]
 
@@ -46,9 +57,9 @@ class TextDetectionService:
         ai_probability = round((burstiness_score * 0.6) + ((1.0 - type_token_ratio) * 0.4), 3)
         ai_probability = max(0.05, min(0.98, ai_probability))
 
-        # 4. Sentence-by-sentence breakdown
+        # 4. Sentence-by-sentence breakdown (capped at MAX_SENTENCE_BREAKDOWN_ITEMS for payload safety)
         sentence_results = []
-        for s in sentences:
+        for s in sentences[:MAX_SENTENCE_BREAKDOWN_ITEMS]:
             s_len = len(s.split())
             diff = abs(s_len - avg_sentence_len)
             is_suspicious = diff < 3.0

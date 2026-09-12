@@ -439,3 +439,50 @@ def test_authentic_text_persists_authentic_prediction(client, app, auth_headers_
             assert scan.result.prediction == "AUTHENTIC"
         else:
             assert scan.result.prediction == "AI_GENERATED"
+
+def test_text_too_long_creates_zero_scans(client, app, auth_headers_a):
+    """
+    Verifies the persistence invariant:
+    When text exceeds MAX_TEXT_LENGTH (25,000 characters), it is rejected with
+    HTTP 400 TEXT_TOO_LONG and creates exactly ZERO Scan and ZERO ScanResult records.
+    """
+    oversized_text = "Forensic evidence inspection sentence repeating. " * 600
+    assert len(oversized_text.strip()) > 25_000
+
+    response = client.post(
+        "/api/detect/text",
+        json={"text": oversized_text},
+        headers=auth_headers_a
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "TEXT_TOO_LONG"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+def test_text_caps_persisted_sentence_breakdown(client, app, auth_headers_a):
+    """
+    Verifies that for long text with >100 sentences, the persisted
+    ScanResult.result_data['sentence_breakdown'] is capped at 100 entries.
+    """
+    sentences = [f"This is forensic analysis sentence number {i}." for i in range(1, 125)]
+    text = " ".join(sentences)
+    assert len(text) < 25_000
+
+    response = client.post(
+        "/api/detect/text",
+        json={"text": text},
+        headers=auth_headers_a
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        scan = Scan.query.first()
+        assert scan is not None
+        assert scan.result is not None
+        result_data = scan.result.result_data
+        assert result_data["metrics"]["total_sentences"] == 124
+        assert len(result_data["sentence_breakdown"]) == 100

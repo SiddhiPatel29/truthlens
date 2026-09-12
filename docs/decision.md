@@ -667,14 +667,29 @@ Enforce strict image dimension and pixel limits (`MAX_IMAGE_WIDTH = 4096`, `MAX_
 5. **Error Code Consistency**:
    Standardizing image format rejections to `INVALID_FORMAT` aligns image detection with video and audio modalities, establishing an unambiguous API contract across the TruthLens platform.
 
+---
 
+## Decision 28: Multi-Modal Resource Bounds & Forensic Payload Hardening (SEC-05, SEC-06, SEC-07)
 
+### Context & Problem
+Following Phase 5 Steps 2–5, three discrete resource bound and payload bloat gaps remained across detection pipelines:
+1. **SEC-05 (Text Ingestion & Database Bloat)**: `POST /api/detect/text` enforced a minimum length (20 chars) but no maximum limit. A 50MB text payload could trigger algorithmic complexity in regex sentence splitting and persist an unbounded list of sentence dictionaries into `ScanResult.result_data`.
+2. **SEC-06 (Video Keyframe Preview Bloat)**: Step 2 downscaled image heatmap previews to 512px thumbnails, but Step 3 omitted downscaling for video keyframe overlays. A 4K video frame produced a 1.5–2.5MB Base64 string in `ScanResult.result_data` on every video scan.
+3. **SEC-07 (Audio Duration Limit)**: Step 3 introduced `MAX_VIDEO_DURATION_SECONDS = 120`, but audio duration was left unbounded (`MAX_AUDIO_DURATION_SECONDS`), allowing long WAV files to consume excessive processing resources.
 
+### Decisions
+1. **Authoritative Text Length Boundary**:
+   Defined a single authoritative constant `MAX_TEXT_LENGTH = 25_000` in `backend/services/text_service.py` and imported it in `backend/routes/text_routes.py`. Text exceeding 25,000 characters is rejected upfront with HTTP 400 `TEXT_TOO_LONG` before `ScanService.create_scan()`.
+2. **Complete Analysis with Capped Breakdown Persistence**:
+   Text detection analyzes the complete accepted text (up to 25,000 characters) to calculate global statistical metrics (`total_sentences`, `total_words`, `burstiness_index`, `lexical_diversity`, `ai_probability`), but caps `sentence_breakdown` at `MAX_SENTENCE_BREAKDOWN_ITEMS = 100` entries. This ensures `ScanResult.result_data` remains compact and predictable.
+3. **Post-Detection Keyframe Preview Downscaling**:
+   In `VideoDetectionService.analyze_video()`, introduced `MAX_PREVIEW_DIMENSION = 512` (matching `ImageDetectionService`). The full-resolution frame is retained for anomaly detection and heatmap generation; downscaling is applied only to the final blended `overlay` thumbnail before JPEG Base64 encoding.
+4. **Harmonized Audio Duration Limits**:
+   Enforced `MAX_AUDIO_DURATION_SECONDS = 120` in `AudioDetectionService.analyze_audio()`, matching the video duration limit. Audio exceeding 120 seconds is cleanly rejected with HTTP 400 `PROCESSING_ERROR` and creates 0 `Scan` records.
+5. **Audio Decoder Architecture Scope**:
+   Evaluated determining WAV duration prior to sample loading. Because `scipy.io.wavfile` does not provide a public header-only duration parser without reading data chunks, introducing a secondary parser or calling private `_read_*` methods would violate architectural stability. Given that `MAX_CONTENT_LENGTH = 50MB` already bounds physical file size, the post-decode 120-second guard is retained and documented.
 
-
-
-
-
-
-
-
+### Reasons & Tradeoffs
+- **Payload Safety**: Eliminates multi-megabyte `result_data` bloat across text and video scans, keeping database records under ~100KB.
+- **Persistence Invariants**: All rejections happen before `ScanService.create_scan()`, guaranteeing zero orphaned database records.
+- **Zero New Dependencies**: Accomplished entirely with existing libraries (`numpy`, `cv2`, `scipy.io.wavfile`).

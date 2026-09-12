@@ -80,7 +80,10 @@ None.
 1. Request must contain a valid Bearer JWT in the `Authorization` header.
 2. Body must be valid JSON object containing key `"text"`.
 3. `"text"` must be a string.
-4. `len(text.strip()) >= 20` characters.
+4. `len(text.strip()) >= 20` characters. (Violations return 400 `TEXT_TOO_SHORT`).
+5. `len(text) <= 25000` characters (`MAX_TEXT_LENGTH`). Oversized text is rejected prior to scan creation. (Violations return 400 `TEXT_TOO_LONG`).
+
+> **Note on `sentence_breakdown`**: The returned and persisted `sentence_breakdown` is capped at a maximum of 100 entries (`MAX_SENTENCE_BREAKDOWN_ITEMS = 100`) to prevent database bloat and memory exhaustion. If the analyzed text contains more than 100 sentences, `sentence_breakdown` will only contain the first 100 sentences. Comprehensive metrics (`total_sentences`, `total_words`, `burstiness_index`, `lexical_diversity`, `ai_probability`) are computed across the entire text without truncation.
 
 ### Success Response (`200 OK`)
 ```json
@@ -152,6 +155,15 @@ None.
     "message": "Text is too short. Please provide at least 20 characters for meaningful analysis.",
     "data": null,
     "error_code": "TEXT_TOO_SHORT"
+  }
+  ```
+- **Text exceeding maximum length (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Text is too long. Maximum permitted length is 25000 characters.",
+    "data": null,
+    "error_code": "TEXT_TOO_LONG"
   }
   ```
 - **Persistence Failure (`500 Internal Server Error`)**:
@@ -329,6 +341,8 @@ None.
 }
 ```
 
+> **Note on `keyframe_heatmap_preview`**: The keyframe preview overlay is guaranteed to be downscaled to thumbnail dimensions (maximum dimension $\le 512$ px, maintaining aspect ratio using `cv2.INTER_AREA`), identical to image heatmap previews. Source video frames sampled for temporal anomaly detection are processed at full native resolution and are never downscaled prior to forensic analysis.
+
 ### Error Responses
 - **Missing or non-Bearer `Authorization` header (`401 Unauthorized`)**:
   ```json
@@ -454,6 +468,7 @@ None.
 6. Magic-byte signature must match WAV container: `RIFF....WAVE` or `RIFX....WAVE`. Bounded 32-byte header inspection with deterministic stream rewind. (Violations return 400 `INVALID_FORMAT`).
 7. Decoded audio buffer must contain at least 1 readable sample (`data.size > 0`) and sample rate must be positive (`sample_rate > 0`). (Violations return 400 `PROCESSING_ERROR`).
 8. Max payload size: 50 MB.
+9. Audio duration must not exceed 120 seconds (`MAX_AUDIO_DURATION_SECONDS`). Audio exceeding 120s is rejected prior to scan persistence with HTTP 400 `PROCESSING_ERROR`.
 
 ### Success Response (`200 OK`)
 ```json
@@ -552,6 +567,15 @@ None.
   {
     "success": false,
     "message": "Uploaded audio contains zero readable audio samples.",
+    "data": null,
+    "error_code": "PROCESSING_ERROR"
+  }
+  ```
+- **Audio duration exceeds limit (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Audio duration (125.0s) exceeds maximum permitted limit (120s).",
     "data": null,
     "error_code": "PROCESSING_ERROR"
   }

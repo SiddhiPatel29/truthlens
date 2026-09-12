@@ -18,6 +18,7 @@ MAX_VIDEO_DURATION_SECONDS = 120
 MAX_VIDEO_WIDTH = 4096
 MAX_VIDEO_HEIGHT = 4096
 MAX_VIDEO_PIXELS = 16_777_216
+MAX_PREVIEW_DIMENSION = 512
 
 class VideoDetectionService:
     @staticmethod
@@ -130,7 +131,17 @@ class VideoDetectionService:
                 heatmap_color = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
                 overlay = cv2.addWeighted(suspicious_frame, 0.6, heatmap_color, 0.4, 0)
 
-                success, buffer = cv2.imencode(".jpg", overlay)
+                # Downscale keyframe overlay to thumbnail representation for preview storage
+                max_dim = max(h, w)
+                if max_dim > MAX_PREVIEW_DIMENSION:
+                    scale = MAX_PREVIEW_DIMENSION / float(max_dim)
+                    new_w = max(1, int(round(w * scale)))
+                    new_h = max(1, int(round(h * scale)))
+                    preview_overlay = cv2.resize(overlay, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    preview_overlay = overlay
+
+                success, buffer = cv2.imencode(".jpg", preview_overlay)
                 if success:
                     encoded = base64.b64encode(buffer).decode("utf-8")
                     heatmap_preview = f"data:image/jpeg;base64,{encoded}"

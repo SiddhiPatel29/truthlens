@@ -3,7 +3,7 @@ Text Detection API Routes.
 """
 import logging
 from flask import Blueprint, request, g
-from backend.services.text_service import TextDetectionService
+from backend.services.text_service import TextDetectionService, MAX_TEXT_LENGTH
 from backend.services.scan_service import ScanService, ScanServiceError
 from backend.utils.auth import require_auth
 from backend.utils.response import api_response
@@ -44,6 +44,14 @@ def detect_text():
             success=False,
             message="Text is too short. Please provide at least 20 characters for meaningful analysis.",
             error_code="TEXT_TOO_SHORT",
+            status_code=400
+        )
+
+    if len(input_text.strip()) > MAX_TEXT_LENGTH:
+        return api_response(
+            success=False,
+            message=f"Text exceeds maximum permitted length of {MAX_TEXT_LENGTH} characters.",
+            error_code="TEXT_TOO_LONG",
             status_code=400
         )
 

@@ -773,3 +773,34 @@ def test_audio_double_dot_filename_persists_scan(client, app, real_audio_path, a
         assert scan.result is not None
 
 
+def test_audio_duration_exceeding_limit_creates_zero_scans(client, app, auth_headers_a):
+    """
+    14. Audio exceeding maximum duration limit (120s):
+        - Returns HTTP 400 with PROCESSING_ERROR.
+        - Exactly zero Scan and ScanResult records are created in DB.
+        - Avoids excessive memory allocation by using a low sample rate (1000 Hz):
+          121s * 1000 samples/sec = 121,000 samples (~242 KB).
+    """
+    from scipy.io import wavfile
+    sample_rate = 1000
+    samples = np.zeros(121000, dtype=np.int16)
+    buf = io.BytesIO()
+    wavfile.write(buf, sample_rate, samples)
+    buf.seek(0)
+
+    response = client.post(
+        "/api/detect/audio",
+        data={"audio": (buf, "oversized_duration.wav")},
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0

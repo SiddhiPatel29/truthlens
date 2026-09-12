@@ -722,3 +722,82 @@ def test_detect_video_spaces_and_unicode_filename_accepted(client, real_video_pa
     assert response.status_code == 200
     assert response.get_json()["success"] is True
 
+
+def test_detect_video_keyframe_preview_is_downscaled_to_thumbnail(client, real_video_path, auth_headers):
+    """Verify video keyframe preview is downscaled to max 512px thumbnail representation."""
+    import base64
+    import numpy as np
+
+    class HighResVideoCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+        def isOpened(self):
+            return True
+        def get(self, prop):
+            if prop == cv2.CAP_PROP_FRAME_COUNT:
+                return 30
+            if prop == cv2.CAP_PROP_FPS:
+                return 30.0
+            if prop == cv2.CAP_PROP_FRAME_WIDTH:
+                return 1280
+            if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+                return 720
+            return 0
+        def set(self, prop, val):
+            pass
+        def read(self):
+            # Return a 720x1280 frame with texture for anomaly scoring
+            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            cv2.rectangle(frame, (100, 100), (500, 400), (255, 255, 255), -1)
+            return True, frame
+        def release(self):
+            pass
+
+    with patch("cv2.VideoCapture", side_effect=HighResVideoCapture):
+        with open(real_video_path, "rb") as vid_file:
+            response = client.post(
+                "/api/detect/video",
+                data={"video": (vid_file, "test.mp4")},
+                content_type="multipart/form-data",
+                headers=auth_headers
+            )
+
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    preview_b64 = json_data["data"]["keyframe_heatmap_preview"]
+    assert preview_b64 is not None
+    assert preview_b64.startswith("data:image/jpeg;base64,")
+
+    # Decode base64 preview back to OpenCV image
+    raw_b64 = preview_b64.split(",", 1)[1]
+    img_bytes = base64.b64decode(raw_b64)
+    np_arr = np.frombuffer(img_bytes, np.uint8)
+    thumb = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    assert thumb is not None
+    assert max(thumb.shape[:2]) <= 512
+    # 1280 x 720 -> width 512, height 720 * (512 / 1280) = 288
+    assert thumb.shape[1] == 512
+    assert thumb.shape[0] == 288
+
+
+def test_detect_video_keyframe_preview_small_source_not_upscaled(client, real_video_path, auth_headers):
+    """Verify small video keyframe preview (300x300) is not upscaled beyond original dimensions."""
+    import base64
+    import numpy as np
+
+    with open(real_video_path, "rb") as vid_file:
+        response = client.post(
+            "/api/detect/video",
+            data={"video": (vid_file, "test.mp4")},
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+
+    assert response.status_code == 200
+    preview_b64 = response.get_json()["data"]["keyframe_heatmap_preview"]
+    raw_b64 = preview_b64.split(",", 1)[1]
+    thumb = cv2.imdecode(np.frombuffer(base64.b64decode(raw_b64), np.uint8), cv2.IMREAD_COLOR)
+    assert thumb.shape[1] == 300
+    assert thumb.shape[0] == 300

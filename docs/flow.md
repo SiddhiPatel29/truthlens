@@ -64,18 +64,21 @@ Body: { "text": "Artificial intelligence synthesis has progressed rapidly..." }
      - If body is None or not dict or 'text' not in body:
        Calls api_response(False, "Request body must contain a 'text' field.", None, "INVALID_INPUT", 400)
   2. Type validation: verifies isinstance(input_text, str)
-  3. Length validation: verifies len(input_text.strip()) >= 20
+  3. Minimum length validation: verifies len(input_text.strip()) >= 20
      - If < 20 chars:
        Calls api_response(False, "Text is too short...", None, "TEXT_TOO_SHORT", 400)
+  4. Maximum length validation: verifies len(input_text.strip()) <= MAX_TEXT_LENGTH (25,000)
+     - If > 25,000 chars:
+       Calls api_response(False, "Text exceeds maximum permitted length of 25000 characters.", None, "TEXT_TOO_LONG", 400) (zero DB persistence)
   │
   ▼
 [backend/services/text_service.py: TextDetectionService.analyze_text(input_text)]
-  1. Cleans text, splits into sentence list using regex: r'(?<=[.!?]) +'
-  2. Calculates sentence length variance and burstiness_score
-  3. Calculates vocabulary repetition and type_token_ratio
+  1. Cleans text, verifies len(cleaned_text) <= MAX_TEXT_LENGTH (25,000), splits into sentence list using regex: r'(?<=[.!?]) +'
+  2. Calculates sentence length variance and burstiness_score over complete accepted text
+  3. Calculates vocabulary repetition and type_token_ratio over complete accepted text
   4. Computes aggregate ai_probability: round((burstiness * 0.6) + ((1 - ttr) * 0.4), 3)
-  5. Computes sentence_breakdown with per-sentence suspicious flag
-  6. Returns dictionary { is_ai_generated, ai_confidence_score, metrics, sentence_breakdown }
+  5. Computes sentence_breakdown with per-sentence suspicious flag, capped at MAX_SENTENCE_BREAKDOWN_ITEMS (100) entries to prevent DB payload bloat
+  6. Returns dictionary { is_ai_generated, ai_confidence_score, metrics: { total_sentences, total_words, burstiness_index, lexical_diversity }, sentence_breakdown }
   │
   ▼
 [backend/routes/text_routes.py: detect_text()]
@@ -248,7 +251,7 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
      - Computes Laplacian variance and anomaly score per frame
   9. Tracks peak anomaly frame (suspicious_frame)
   10. Calculates overall sequence confidence mean and temporal instability standard deviation
-  11. Renders Grad-CAM++ heatmap overlay on peak suspicious frame and encodes to Base64 data URL
+  11. Renders Grad-CAM++ heatmap overlay on peak suspicious frame; downscales overlay to thumbnail representation (MAX_PREVIEW_DIMENSION = 512) using cv2.INTER_AREA, and encodes to Base64 data URL
   12. finally block guarantees deterministic cleanup order:
      - cap.release() executes strictly BEFORE os.remove(temp_path)
      - On Windows, this prevents PermissionError [WinError 32] file handle lock leaks
@@ -329,14 +332,16 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
      - If data.size == 0: raises ValueError ("Uploaded audio contains zero readable audio samples.")
      - If sample_rate <= 0: raises ValueError ("Uploaded audio has an invalid sample rate.")
   4. Converts stereo to mono if multi-channel (data.mean(axis=1))
-  5. Computes Zero Crossing Rate (ZCR): np.sum(np.diff(data > 0) != 0) / len(data)
-  6. Computes spectral energy variance: np.var(data)
-  7. Estimates synthetic vocal confidence score
-  8. Flags temporal lip-sync discrepancy window intervals
-  9. finally block guarantees deterministic cleanup:
-     - os.remove(temp_path) executes on success, decoder failure, or processing exception
+  5. Computes duration_sec = round(len(data) / float(sample_rate), 2)
+     - If duration_sec > MAX_AUDIO_DURATION_SECONDS (120): raises ValueError("Audio duration ... exceeds maximum permitted limit (120s).") (returns 400 PROCESSING_ERROR, 0 scans)
+  6. Computes Zero Crossing Rate (ZCR): np.sum(np.diff(data > 0) != 0) / len(data)
+  7. Computes spectral energy variance: np.var(data)
+  8. Estimates synthetic vocal confidence score
+  9. Flags temporal lip-sync discrepancy window intervals
+  10. finally block guarantees deterministic cleanup:
+     - os.remove(temp_path) executes on success, decoder failure, limit violation, or processing exception
      - Cleanup failures log a warning without crashing the response
-  10. Returns analysis dictionary
+  11. Returns analysis dictionary
   │
   ▼
 [backend/routes/audio_routes.py: detect_audio()]

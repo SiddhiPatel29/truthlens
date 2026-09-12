@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-12
-- **Result Summary**: **309 passed, 0 failed, 0 skipped in 83.47s**
+- **Result Summary**: **322 passed, 0 failed, 0 skipped in 67.88s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -310,6 +310,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/audio` | POST | Multipart (RIFF non-WAVE AVI with .wav, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (Path traversal `sub/folder/evil.wav`, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (Double-dot `recording..v1.wav`, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/text` | POST | JSON (Text > 25,000 chars, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/text` | POST | JSON (Text == 25,000 chars boundary, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/text` | POST | JSON (120 sentences, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/video` | POST | Multipart (1280x720 video frame, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (WAV duration > 120s, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (WAV duration == 120.0s, Bearer token) | 200 | 200 | True | **PASSED** |
 
 ---
 
@@ -331,5 +337,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Filename security (SEC-04) | Pytest & live verification | **PASSED** | Path traversal, drive letters, control chars rejected; ordinary double dots & unicode accepted |
 | Deterministic stream rewind | Unit test in test_file_validator.py | **PASSED** | Stream position reliably preserved via `finally: stream.seek(pos)` |
 | Zero-scan persistence invariant | Persistence test assertions | **PASSED** | Rejections at validator boundary create 0 Scan and 0 ScanResult records |
-
-
+| Text length bounds (SEC-05) | Pytest & live verification | **PASSED** | Text > 25,000 chars rejected with 400 `TEXT_TOO_LONG`; creates 0 scans |
+| Sentence breakdown capping (SEC-05) | Pytest & live verification | **PASSED** | Breakdown capped at 100 entries in response & DB, metrics show true total |
+| Video keyframe downscaling (SEC-06) | Pytest & live verification | **PASSED** | Keyframe preview thumbnail downscaled to <= 512px; reduces payload by >90% |
+| Audio duration bounds (SEC-07) | Pytest & live verification | **PASSED** | Audio > 120s rejected with 400 `PROCESSING_ERROR`; creates 0 scans |

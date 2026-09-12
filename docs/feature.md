@@ -473,13 +473,42 @@ This document records the features implemented during each development phase of 
   - Complete test suite: **309 passed out of 309 tests in 83.47s**.
 - **Current Status**: Complete.
 
+---
 
-
-
-
-
-
-
-
-
-
+## 23. Multi-Modal Resource Bounds & Forensic Payload Hardening (Phase 5 Step 6)
+- **Status**: Completed (Phase 5 Step 6).
+- **Reason**: Harmonize resource constraints and enforce strict database payload discipline across all four detection modalities (Text, Video, Audio, Image). Resolves SEC-05 (unbounded text input DoS & sentence breakdown database explosion), SEC-06 (unscaled 4K video keyframe heatmap preview bloat), and SEC-07 (missing audio duration bounds).
+- **Files Changed / Created**:
+  - `backend/services/text_service.py` (Modified - introduced authoritative `MAX_TEXT_LENGTH = 25_000` and `MAX_SENTENCE_BREAKDOWN_ITEMS = 100`; analyzes complete accepted text while capping persisted sentence breakdown; documented capping behavior)
+  - `backend/routes/text_routes.py` (Modified - imported `MAX_TEXT_LENGTH`; added validation check rejecting text > 25,000 characters with HTTP 400 `TEXT_TOO_LONG` before database scan creation)
+  - `backend/services/video_service.py` (Modified - introduced `MAX_PREVIEW_DIMENSION = 512`; downscaled keyframe heatmap overlay thumbnail using `cv2.INTER_AREA` before JPEG Base64 encoding without resizing detection frame)
+  - `backend/services/audio_service.py` (Modified - introduced `MAX_AUDIO_DURATION_SECONDS = 120`; cleanly rejects audio exceeding 120s with HTTP 400 `PROCESSING_ERROR` before persistence)
+  - `tests/test_text_detection.py` (Modified - added 4 unit/route tests for `TEXT_TOO_LONG`, 25,000 char boundary, and 100-sentence breakdown capping)
+  - `tests/test_text_persistence.py` (Modified - added 2 persistence invariant tests verifying 0 scans created on `TEXT_TOO_LONG` and persisted breakdown capping in `ScanResult.result_data`)
+  - `tests/test_video_detection.py` (Modified - added 2 tests verifying 1280x720 video keyframe preview is downscaled to <= 512px thumbnail while small video is not upscaled)
+  - `tests/test_video_persistence.py` (Modified - added 1 persistence test verifying high-res video persists downscaled thumbnail in database)
+  - `tests/test_audio_detection.py` (Modified - added 3 tests for audio duration limit enforcement (> 120s rejected, 120.0s boundary accepted, direct service exception))
+  - `tests/test_audio_persistence.py` (Modified - added 1 persistence invariant test verifying audio > 120s creates 0 scans)
+  - `scratch/verify_live_resource_bounds_and_payloads.py` (Created - live in-process verification script covering all 7 scenarios and database invariants)
+  - `docs/decision.md` (Updated - added Decision 28)
+  - `docs/flow.md` (Updated - updated Text, Video, and Audio detection execution flows)
+  - `docs/feature.md` (Updated - added Feature 23)
+  - `docs/bug.md` (Updated - added Bug 10 SEC-05, SEC-06, SEC-07)
+  - `docs/test-checklist.md` (Updated - updated test counts and matrix entries)
+  - `docs/context.md` (Updated - updated completed work, architecture decisions, and roadmap status)
+  - `docs/api/backend-api.md` (Updated - updated API documentation with text length bounds, `TEXT_TOO_LONG` error code, audio duration limits, and thumbnail downscaling guarantees)
+- **Implementation**:
+  - **Text Length Bounds**: Defined `MAX_TEXT_LENGTH = 25_000` (~4,000–5,000 words). Validated at route level before any database operations; returns HTTP 400 `TEXT_TOO_LONG`.
+  - **Sentence Breakdown Capping**: `TextDetectionService.analyze_text` evaluates global metrics over the complete accepted text, but caps `sentence_breakdown` list to the first 100 entries (`MAX_SENTENCE_BREAKDOWN_ITEMS = 100`) to prevent database bloat.
+  - **Video Keyframe Thumbnail Downscaling**: Applied `MAX_PREVIEW_DIMENSION = 512` to `suspicious_frame` overlay before JPEG encoding, slashing payload from ~2.5MB down to ~30–60KB per scan while keeping detection frames at original resolution.
+  - **Audio Duration Bounds**: Enforced `MAX_AUDIO_DURATION_SECONDS = 120` in `AudioDetectionService.analyze_audio()`, aligning with the video duration limit.
+  - **Zero-Scan Persistence Invariants**: All out-of-bounds or rejected uploads return HTTP 400 before `ScanService.create_scan()`, guaranteeing exactly 0 `Scan` and 0 `ScanResult` database records.
+- **Tests**:
+  - `tests/test_text_detection.py`: 9 passed.
+  - `tests/test_text_persistence.py`: 12 passed.
+  - `tests/test_video_detection.py`: 33 passed.
+  - `tests/test_video_persistence.py`: 18 passed.
+  - `tests/test_audio_detection.py`: 34 passed.
+  - `tests/test_audio_persistence.py`: 22 passed.
+  - Complete test suite: **322 passed out of 322 tests in 67.88s**.
+- **Current Status**: Complete.

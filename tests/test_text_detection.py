@@ -107,3 +107,57 @@ def test_detect_text_empty_body(client, auth_headers):
     json_data = response.get_json()
     assert json_data["success"] is False
     assert json_data["error_code"] == "INVALID_INPUT"
+
+def test_detect_text_too_long(client, auth_headers):
+    """Verify text exceeding MAX_TEXT_LENGTH (25,000 characters) returns 400 TEXT_TOO_LONG."""
+    oversized_text = "This is a valid sentence that repeats. " * 700  # ~27,300 chars > 25,000
+    assert len(oversized_text.strip()) > 25_000
+
+    response = client.post("/api/detect/text", json={"text": oversized_text}, headers=auth_headers)
+    assert response.status_code == 400
+    assert response.is_json
+
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "TEXT_TOO_LONG"
+    assert "exceeds maximum permitted length of 25000 characters" in json_data["message"]
+
+def test_detect_text_at_max_length_boundary_succeeds(client, auth_headers):
+    """Verify text at exactly MAX_TEXT_LENGTH (25,000 characters) succeeds with 200."""
+    base_sentence = "The forensic analyst carefully verified every single data packet for manipulation. "
+    repeats = 25_000 // len(base_sentence)
+    exact_text = base_sentence * repeats
+    padding = "." * (25_000 - len(exact_text))
+    boundary_text = exact_text + padding
+    assert len(boundary_text.strip()) == 25_000
+
+    response = client.post("/api/detect/text", json={"text": boundary_text}, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is True
+
+def test_detect_text_caps_sentence_breakdown(client, auth_headers):
+    """Verify text with >100 sentences analyzes complete text but caps sentence_breakdown at 100."""
+    sentences = [f"This is forensic analysis sentence number {i}." for i in range(1, 131)]
+    long_text = " ".join(sentences)
+    assert len(long_text) < 25_000
+
+    response = client.post("/api/detect/text", json={"text": long_text}, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.is_json
+
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    data = json_data["data"]
+    # Total sentences in metrics reflects all 130 sentences
+    assert data["metrics"]["total_sentences"] == 130
+    # But sentence_breakdown list is capped at 100 entries for database safety
+    assert len(data["sentence_breakdown"]) == 100
+
+def test_detect_text_service_too_long_raises_value_error():
+    """Verify TextDetectionService.analyze_text directly raises ValueError if text > 25,000 chars."""
+    from backend.services.text_service import TextDetectionService, MAX_TEXT_LENGTH
+    oversized = "a" * (MAX_TEXT_LENGTH + 10)
+    with pytest.raises(ValueError, match="exceeds maximum permitted length"):
+        TextDetectionService.analyze_text(oversized)

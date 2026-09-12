@@ -454,3 +454,74 @@ def test_detect_audio_spaces_and_unicode_filename_accepted(client, real_audio_pa
     assert response.get_json()["success"] is True
 
 
+def test_detect_audio_duration_exceeding_limit_rejected_400(client, auth_headers):
+    """
+    Verify audio with duration > 120s is rejected with 400 PROCESSING_ERROR.
+    Uses small sample rate (1000 Hz) to avoid unnecessary memory allocations:
+    121s * 1000 samples/sec = 121,000 samples (only ~242 KB).
+    """
+    from scipy.io import wavfile
+    sample_rate = 1000
+    samples = np.zeros(121000, dtype=np.int16)
+    buf = io.BytesIO()
+    wavfile.write(buf, sample_rate, samples)
+    buf.seek(0)
+
+    response = client.post(
+        "/api/detect/audio",
+        data={"audio": (buf, "oversized_duration.wav")},
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "PROCESSING_ERROR"
+    assert "exceeds maximum permitted limit (120s)" in json_data["message"]
+    assert "121" in json_data["message"]
+
+
+def test_detect_audio_duration_boundary_120_seconds_accepted(client, auth_headers):
+    """
+    Verify audio with duration exactly 120.0s is accepted.
+    120s * 1000 samples/sec = 120,000 samples (only ~240 KB).
+    """
+    from scipy.io import wavfile
+    sample_rate = 1000
+    # Provide sinusoidal data so ZCR and variance compute cleanly
+    t = np.linspace(0, 120, 120000, endpoint=False)
+    samples = (np.sin(2 * np.pi * 5 * t) * 10000).astype(np.int16)
+    buf = io.BytesIO()
+    wavfile.write(buf, sample_rate, samples)
+    buf.seek(0)
+
+    response = client.post(
+        "/api/detect/audio",
+        data={"audio": (buf, "boundary_120s.wav")},
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 200
+    json_data = response.get_json()
+    assert json_data["success"] is True
+    assert json_data["data"]["metrics"]["duration_seconds"] == 120.0
+
+
+def test_audio_service_direct_duration_exceeded_raises_value_error():
+    """Verify AudioDetectionService.analyze_audio raises ValueError when audio exceeds 120s."""
+    from scipy.io import wavfile
+    sample_rate = 1000
+    samples = np.zeros(122000, dtype=np.int16)  # 122s
+    buf = io.BytesIO()
+    wavfile.write(buf, sample_rate, samples)
+    buf.seek(0)
+
+    class DummyFileStorage:
+        def __init__(self, stream):
+            self.stream = stream
+        def save(self, dst):
+            self.stream.seek(0)
+            dst.write(self.stream.read())
+
+    with pytest.raises(ValueError, match="exceeds maximum permitted limit"):
+        AudioDetectionService.analyze_audio(DummyFileStorage(buf))

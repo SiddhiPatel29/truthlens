@@ -10,6 +10,9 @@ from scipy.io import wavfile
 
 logger = logging.getLogger(__name__)
 
+# Audio resource bounds
+MAX_AUDIO_DURATION_SECONDS = 120
+
 class AudioDetectionService:
     @staticmethod
     def analyze_audio(file_storage) -> dict:
@@ -46,6 +49,10 @@ class AudioDetectionService:
                 data = data / max_val
 
             duration_sec = round(len(data) / float(sample_rate), 2)
+            if duration_sec > MAX_AUDIO_DURATION_SECONDS:
+                raise ValueError(
+                    f"Audio duration ({duration_sec}s) exceeds maximum permitted limit ({MAX_AUDIO_DURATION_SECONDS}s)."
+                )
 
             # 1. Zero Crossing Rate (ZCR) - detects synthetic noise floors
             zero_crossings = np.sum(np.diff(data > 0) != 0)
