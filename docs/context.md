@@ -182,6 +182,7 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Image Decompression Bomb & Resource Protection**: Rejects images exceeding 4096x4096px or 16MP before memory-intensive convolutions; downscales previews to 512px thumbnails.
 - **Video Resource Bounds & Deterministic Windows Cleanup**: Enforces duration limits (120s), resolution bounds (4096x4096px / 16MP), and guarantees `cap.release()` before `os.remove(temp_path)` in `finally:`, eliminating Windows file handle lock leaks (`WinError 32`).
 - **Audio Integrity & Elimination of Fabricated Forensics**: Replaces synthetic Gaussian noise fallbacks with clean `ValueError` propagation; adopts Option A WAV-only policy for `scipy.io.wavfile.read()`; validates buffer sample size and rate; enforces deterministic tempfile deletion; guarantees 0 scans persisted on rejected uploads.
+- **Magic-Byte Signature Validation & Filename Security (SEC-04)**: Inspects bounded 32-byte stream prefixes with deterministic `finally: stream.seek(pos)` rewinding; verifies container headers (JPEG, PNG, WebP, MP4, MOV with conservative `ftyp`, AVI, MKV, WAV); blocks path traversal (`/`, `\`), Windows drive letters (`:`), control characters, and dot directory navigation while permitting legitimate double-dot basenames (`audit..v1.jpg`), spaces, and Unicode.
 - **Uniform Response Envelope**: Every endpoint returns `{ success, message, data, error_code }`.
 
 ---
@@ -190,16 +191,15 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
 3. **Audio Format Scope (WAV-Only)**: Audio detection currently supports uncompressed WAV containers decoded via `scipy.io.wavfile.read()`. Support for compressed formats (MP3/M4A/FLAC/AAC) is deferred until a dedicated transcoding/decoding pipeline (e.g. via ffmpeg or PyAV) is introduced.
-4. **Basic Extension File Validation**: Media validation currently inspects file extensions; binary magic-byte / MIME-type inspection belongs to Phase 5 Step 5.
-5. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
-6. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
+4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
+5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
 
 ---
 
 ## 6. Recommended Next Backend Task
-Proceed to **Phase 5 Step 5: Magic-Byte & Header Ingestion Validation Hardening**:
-1. Inspect file signatures / magic bytes (e.g. PNG `\x89PNG\r\n\x1a\n`, JPEG `\xff\xd8\xff`, RIFF `RIFF....WAVE`, MP4 `ftyp`) at the validation layer before passing streams to decoders.
-2. Prevent extension spoofing (e.g., an executable or text script renamed to `.wav` or `.jpg`).
+Phase 5 Step 5 (File format / magic-byte validation + filename security) is complete with 309 automated tests passing.
+Proceed to the next security audit or hardening item on the Phase 5 roadmap (e.g., Rate Limiting & Abuse Prevention, Request Payload Limits, or Phase 6 Abuse Reporting Persistence).
+
 
 
 

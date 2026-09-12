@@ -337,7 +337,7 @@ def test_missing_image_file_field_preserves_400_no_scan_created(client, app, aut
 def test_unsupported_image_extension_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
     6. Unsupported file extension:
-       - Returns HTTP 400 with INVALID_FILE.
+       - Returns HTTP 400 with INVALID_FORMAT.
        - No Scan or ScanResult record is created in the database.
     """
     data = {"image": (io.BytesIO(b"arbitrary text content"), "payload.txt")}
@@ -353,7 +353,7 @@ def test_unsupported_image_extension_preserves_400_no_scan_created(client, app, 
 
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "INVALID_FILE"
+    assert json_data["error_code"] == "INVALID_FORMAT"
 
     with app.app_context():
         assert Scan.query.count() == 0
@@ -392,11 +392,11 @@ def test_empty_filename_preserves_400_no_scan_created(client, app, auth_headers_
 
 def test_corrupt_image_content_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
-    7b. Corrupted/unreadable image byte stream:
+    7b. Corrupted image byte stream with valid magic bytes:
        - Returns HTTP 400 with PROCESSING_ERROR.
        - No Scan or ScanResult record is created in the database.
     """
-    data = {"image": (io.BytesIO(b"corrupted binary stream"), "broken.jpg")}
+    data = {"image": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00corrupted_payload"), "broken.jpg")}
     response = client.post(
         "/api/detect/image",
         data=data,
@@ -604,4 +604,87 @@ def test_persisted_image_scan_result_contains_downscaled_thumbnail(client, app, 
         assert thumb.shape[0] == 307
         assert thumb.shape[1] <= 512
         assert thumb.shape[0] <= 512
+
+
+# ===========================================================================
+# 12. Phase 5 Step 5: Magic-Byte and Filename Persistence Invariants
+# ===========================================================================
+
+def test_invalid_image_magic_bytes_preserves_400_no_scan_created(client, app, auth_headers_a):
+    """
+    12.1. Arbitrary random bytes with .jpg extension:
+        - Returns HTTP 400 with INVALID_FORMAT.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"image": (io.BytesIO(b"random non-image bytes here"), "payload.jpg")}
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_image_path_traversal_filename_preserves_400_no_scan_created(client, app, real_image_path, auth_headers_a):
+    """
+    12.2. Filename path traversal attempt:
+        - Returns HTTP 400 with INVALID_FILE.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "../../evil_traversal.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_image_double_dot_filename_persists_scan(client, app, real_image_path, auth_headers_a, auth_user_a):
+    """
+    12.3. Legitimate double dot in filename (e.g. audit..v1.jpg):
+        - Returns HTTP 200.
+        - Persists Scan with scan.filename == 'audit..v1.jpg'.
+    """
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "audit..v1.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 200
+    assert response.is_json
+
+    with app.app_context():
+        assert Scan.query.count() == 1
+        scan = Scan.query.filter_by(user_id=auth_user_a["id"]).first()
+        assert scan is not None
+        assert scan.filename == "audit..v1.jpg"
+        assert scan.status == "COMPLETED"
+        assert scan.result is not None
+
 

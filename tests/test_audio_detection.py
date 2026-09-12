@@ -180,7 +180,7 @@ def test_detect_audio_corrupt_content(client, auth_headers):
     assert "Failed to decode audio file" in json_data["message"]
 
 def test_detect_audio_empty_wav(client, auth_headers):
-    """Verify 0-byte WAV upload is rejected with 400 PROCESSING_ERROR."""
+    """Verify 0-byte WAV upload is rejected with 400 INVALID_FORMAT."""
     data = {
         "audio": (io.BytesIO(b""), "empty.wav")
     }
@@ -193,7 +193,7 @@ def test_detect_audio_empty_wav(client, auth_headers):
     assert response.status_code == 400
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "PROCESSING_ERROR"
+    assert json_data["error_code"] == "INVALID_FORMAT"
 
 def test_detect_audio_no_synthetic_noise_fallback(client, real_audio_path, auth_headers):
     """
@@ -221,10 +221,11 @@ def test_detect_audio_no_synthetic_noise_fallback(client, real_audio_path, auth_
 
 def test_detect_audio_zero_samples_buffer_rejected(client, auth_headers):
     """Verify empty/zero-sample decoded buffer raises 400 PROCESSING_ERROR."""
+    valid_wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     with patch("scipy.io.wavfile.read", return_value=(16000, np.array([], dtype=np.float32))):
         response = client.post(
             "/api/detect/audio",
-            data={"audio": (io.BytesIO(b"dummy"), "zero_samples.wav")},
+            data={"audio": (io.BytesIO(valid_wav_header), "zero_samples.wav")},
             content_type="multipart/form-data",
             headers=auth_headers
         )
@@ -237,10 +238,11 @@ def test_detect_audio_zero_samples_buffer_rejected(client, auth_headers):
 
 def test_detect_audio_invalid_sample_rate_rejected(client, auth_headers):
     """Verify non-positive sample rate raises 400 PROCESSING_ERROR."""
+    valid_wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     with patch("scipy.io.wavfile.read", return_value=(0, np.array([0.1, 0.2], dtype=np.float32))):
         response = client.post(
             "/api/detect/audio",
-            data={"audio": (io.BytesIO(b"dummy"), "zero_rate.wav")},
+            data={"audio": (io.BytesIO(valid_wav_header), "zero_rate.wav")},
             content_type="multipart/form-data",
             headers=auth_headers
         )
@@ -287,7 +289,7 @@ def test_detect_audio_tempfile_cleanup_on_decoder_failure(client, auth_headers):
     with patch("tempfile.mkstemp", side_effect=track_mkstemp):
         response = client.post(
             "/api/detect/audio",
-            data={"audio": (io.BytesIO(b"corrupted binary wav"), "corrupt_cleanup.wav")},
+            data={"audio": (io.BytesIO(b"RIFF\x24\x00\x00\x00WAVEcorrupted binary wav"), "corrupt_cleanup.wav")},
             content_type="multipart/form-data",
             headers=auth_headers
         )
@@ -319,4 +321,136 @@ def test_detect_audio_tempfile_cleanup_on_processing_exception(client, real_audi
     assert response.status_code == 400
     assert len(created_temp_files) == 1
     assert not os.path.exists(created_temp_files[0])
+
+
+# ===========================================================================
+# Phase 5 Step 5: Audio Magic-Byte and Filename Security Tests
+# ===========================================================================
+
+def test_detect_audio_invalid_magic_bytes_rejected(client, auth_headers):
+    """Verify arbitrary random bytes with .wav extension return 400 INVALID_FORMAT."""
+    data = {
+        "audio": (io.BytesIO(b"not an actual wav byte stream at all"), "corrupted.wav")
+    }
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+    assert "WAV container signature" in json_data["message"]
+
+
+def test_detect_audio_mp3_header_rejected(client, auth_headers):
+    """Verify MP3 stream (ID3 header) uploaded as .wav is rejected with 400 INVALID_FORMAT."""
+    data = {
+        "audio": (io.BytesIO(b"ID3\x03\x00\x00\x00\x00\x00\x00mp3_audio_data"), "fake.wav")
+    }
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+    assert "WAV container signature" in json_data["message"]
+
+
+def test_detect_audio_riff_non_wave_rejected(client, auth_headers):
+    """Verify RIFF container that is not WAVE (e.g. AVI) is rejected with 400 INVALID_FORMAT."""
+    data = {
+        "audio": (io.BytesIO(b"RIFF\x24\x00\x00\x00AVI LIST\x00\x00\x00\x00payload"), "fake.wav")
+    }
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+
+@pytest.mark.parametrize("bad_name", [
+    "../../evil.wav",
+    r"..\..\evil.wav",
+    "sub/folder/evil.wav",
+    r"sub\folder\evil.wav",
+    "C:evil.wav",
+    ".hidden.wav",
+    "evil.wav.",
+    "evil.wav ",
+])
+def test_detect_audio_path_traversal_and_unsafe_filenames_rejected(client, auth_headers, bad_name):
+    """Verify path traversal, separators, colons, dot prefixes/suffixes return 400 INVALID_FILE."""
+    valid_wav = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    data = {
+        "audio": (io.BytesIO(valid_wav), bad_name)
+    }
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_audio_control_char_filename_rejected(client, auth_headers):
+    """Verify null bytes or control characters in filename return 400 INVALID_FILE."""
+    valid_wav = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    data = {
+        "audio": (io.BytesIO(valid_wav), "evil\x00audio.wav")
+    }
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_audio_double_dot_filename_accepted(client, real_audio_path, auth_headers):
+    """Verify legitimate ordinary double dots in filename (e.g. recording..final.wav) are accepted."""
+    with open(real_audio_path, "rb") as aud_file:
+        data = {"audio": (aud_file, "recording..final.wav")}
+        response = client.post(
+            "/api/detect/audio",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
+
+def test_detect_audio_spaces_and_unicode_filename_accepted(client, real_audio_path, auth_headers):
+    """Verify spaces and international Unicode characters in filename are accepted."""
+    with open(real_audio_path, "rb") as aud_file:
+        data = {"audio": (aud_file, "intercepted voice recording 2026.wav")}
+        response = client.post(
+            "/api/detect/audio",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
 

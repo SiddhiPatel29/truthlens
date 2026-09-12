@@ -145,7 +145,7 @@ def test_detect_image_empty_filename(client, auth_headers):
     assert json_data["error_code"] == "INVALID_FILE"
 
 def test_detect_image_unsupported_extension(client, auth_headers):
-    """Verify file with invalid extension returns 400 INVALID_FILE."""
+    """Verify file with invalid extension returns 400 INVALID_FORMAT."""
     data = {
         "image": (io.BytesIO(b"dummy binary data"), "test.txt")
     }
@@ -159,12 +159,12 @@ def test_detect_image_unsupported_extension(client, auth_headers):
     
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "INVALID_FILE"
+    assert json_data["error_code"] == "INVALID_FORMAT"
 
 def test_detect_image_corrupt_content(client, auth_headers):
-    """Verify invalid/corrupted image payload returns 400 PROCESSING_ERROR."""
+    """Verify corrupted image payload with valid magic bytes returns 400 PROCESSING_ERROR."""
     data = {
-        "image": (io.BytesIO(b"not an actual image byte stream"), "corrupted.jpg")
+        "image": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00corrupt_payload"), "corrupted.jpg")
     }
     response = client.post(
         "/api/detect/image",
@@ -319,4 +319,117 @@ def test_detect_image_heatmap_small_source_not_upscaled(client, auth_headers):
     thumb = decode_base64_jpeg(json_data["data"]["heatmap_preview"])
     assert thumb.shape[1] == 200
     assert thumb.shape[0] == 150
+
+
+# ===========================================================================
+# Phase 5 Step 5: Magic-Byte and Filename Security Tests
+# ===========================================================================
+
+def test_detect_image_invalid_magic_bytes_rejected(client, auth_headers):
+    """Verify arbitrary random bytes with .jpg extension return 400 INVALID_FORMAT."""
+    data = {
+        "image": (io.BytesIO(b"not an actual image byte stream at all"), "corrupted.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+    assert "JPEG signature" in json_data["message"]
+
+
+def test_detect_image_signature_mismatch_rejected(client, auth_headers):
+    """Verify PNG payload uploaded with .jpg extension is rejected with 400 INVALID_FORMAT."""
+    png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    data = {
+        "image": (io.BytesIO(png_bytes), "mismatched.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+
+@pytest.mark.parametrize("bad_name", [
+    "../../evil.jpg",
+    r"..\..\evil.jpg",
+    "sub/folder/evil.jpg",
+    r"sub\folder\evil.jpg",
+    "C:evil.jpg",
+    ".hidden.jpg",
+    "evil.jpg.",
+    "evil.jpg ",
+])
+def test_detect_image_path_traversal_and_unsafe_filenames_rejected(client, auth_headers, bad_name):
+    """Verify path traversal, separators, colons, dot prefixes/suffixes return 400 INVALID_FILE."""
+    data = {
+        "image": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF"), bad_name)
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_image_control_char_filename_rejected(client, auth_headers):
+    """Verify null bytes or control characters in filename return 400 INVALID_FILE."""
+    data = {
+        "image": (io.BytesIO(b"\xff\xd8\xff\xe0\x00\x10JFIF"), "test\x00image.jpg")
+    }
+    response = client.post(
+        "/api/detect/image",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_image_double_dot_filename_accepted(client, real_image_path, auth_headers):
+    """Verify legitimate ordinary double dots in filename (e.g. audit..v1.jpg) are accepted."""
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "audit..v1.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
+
+def test_detect_image_spaces_and_unicode_filename_accepted(client, real_image_path, auth_headers):
+    """Verify spaces and international Unicode characters in filename are accepted."""
+    with open(real_image_path, "rb") as img_file:
+        data = {"image": (img_file, "forensic evidence photo 2026.jpg")}
+        response = client.post(
+            "/api/detect/image",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
 

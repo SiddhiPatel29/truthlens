@@ -144,9 +144,9 @@ def test_detect_video_unsupported_extension(client, auth_headers):
     assert json_data["error_code"] == "INVALID_FORMAT"
 
 def test_detect_video_corrupt_content(client, auth_headers):
-    """Verify invalid/corrupted video payload returns 400 PROCESSING_ERROR."""
+    """Verify corrupted video payload with valid magic bytes returns 400 PROCESSING_ERROR."""
     data = {
-        "video": (io.BytesIO(b"not an actual video byte stream"), "corrupted.mp4")
+        "video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00corrupt_payload"), "corrupted.mp4")
     }
     response = client.post(
         "/api/detect/video",
@@ -241,7 +241,7 @@ def test_detect_video_cleanup_when_not_opened(client, auth_headers):
         with patch("os.remove", side_effect=lambda p: event_log.append("file_removed")):
             response = client.post(
                 "/api/detect/video",
-                data={"video": (io.BytesIO(b"dummy video data"), "unopened.mp4")},
+                data={"video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00dummy video data"), "unopened.mp4")},
                 content_type="multipart/form-data",
                 headers=auth_headers
             )
@@ -264,7 +264,7 @@ def test_detect_video_cleanup_when_zero_frames(client, auth_headers):
         with patch("os.remove", side_effect=lambda p: event_log.append("file_removed")):
             response = client.post(
                 "/api/detect/video",
-                data={"video": (io.BytesIO(b"dummy video data"), "zero_frames.mp4")},
+                data={"video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00dummy video data"), "zero_frames.mp4")},
                 content_type="multipart/form-data",
                 headers=auth_headers
             )
@@ -584,7 +584,7 @@ def test_detect_video_resolution_boundary_4096_accepted(client, real_video_path,
     assert response.status_code == 200
     assert response.get_json()["success"] is True
 
-def test_detect_video_dynamic_tempfile_suffix(client, real_video_path, auth_headers):
+def test_detect_video_dynamic_tempfile_suffix(client, auth_headers):
     """Verify tempfile suffix is dynamically derived from upload filename extension."""
     captured_suffixes = []
     real_mkstemp = tempfile.mkstemp
@@ -594,14 +594,131 @@ def test_detect_video_dynamic_tempfile_suffix(client, real_video_path, auth_head
         captured_suffixes.append(suffix)
         return real_mkstemp(*args, **kwargs)
 
+    ext_payloads = {
+        "mov": b"\x00\x00\x00\x18ftypqt  \x00\x00\x00\x00video_payload",
+        "avi": b"RIFF\x28\x00\x00\x00AVI LIST\x00\x00\x00\x00video_payload",
+        "mkv": b"\x1a\x45\xdf\xa3\x93\x42\x86\x81\x00\x00\x00\x00video_payload",
+    }
+
     with patch("tempfile.mkstemp", side_effect=spy_mkstemp):
-        for ext in ["mov", "avi", "mkv"]:
-            with open(real_video_path, "rb") as vid_file:
-                client.post(
-                    "/api/detect/video",
-                    data={"video": (vid_file, f"evidence.{ext}")},
-                    content_type="multipart/form-data",
-                    headers=auth_headers
-                )
+        for ext, payload in ext_payloads.items():
+            client.post(
+                "/api/detect/video",
+                data={"video": (io.BytesIO(payload), f"evidence.{ext}")},
+                content_type="multipart/form-data",
+                headers=auth_headers
+            )
 
     assert captured_suffixes == [".mov", ".avi", ".mkv"]
+
+
+# ===========================================================================
+# Phase 5 Step 5: Video Magic-Byte and Filename Security Tests
+# ===========================================================================
+
+def test_detect_video_invalid_magic_bytes_rejected(client, auth_headers):
+    """Verify arbitrary random bytes with .mp4 extension return 400 INVALID_FORMAT."""
+    data = {
+        "video": (io.BytesIO(b"not an actual video byte stream at all"), "corrupted.mp4")
+    }
+    response = client.post(
+        "/api/detect/video",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+    assert "MP4 container signature" in json_data["message"]
+
+
+def test_detect_video_mov_arbitrary_box_rejected(client, auth_headers):
+    """Verify non-ftyp MOV boxes (e.g. moov, wide, skip) are rejected under conservative rule."""
+    data = {
+        "video": (io.BytesIO(b"\x00\x00\x00\x18moov\x00\x00\x00\x00video_stream"), "clip.mov")
+    }
+    response = client.post(
+        "/api/detect/video",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+
+@pytest.mark.parametrize("bad_name", [
+    "../../evil.mp4",
+    r"..\..\evil.mp4",
+    "sub/folder/evil.mp4",
+    r"sub\folder\evil.mp4",
+    "C:evil.mp4",
+    ".hidden.mp4",
+    "evil.mp4.",
+    "evil.mp4 ",
+])
+def test_detect_video_path_traversal_and_unsafe_filenames_rejected(client, auth_headers, bad_name):
+    """Verify path traversal, separators, colons, dot prefixes/suffixes return 400 INVALID_FILE."""
+    data = {
+        "video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42"), bad_name)
+    }
+    response = client.post(
+        "/api/detect/video",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_video_control_char_filename_rejected(client, auth_headers):
+    """Verify null bytes or control characters in filename return 400 INVALID_FILE."""
+    data = {
+        "video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42"), "evil\x00video.mp4")
+    }
+    response = client.post(
+        "/api/detect/video",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers
+    )
+    assert response.status_code == 400
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+
+def test_detect_video_double_dot_filename_accepted(client, real_video_path, auth_headers):
+    """Verify legitimate ordinary double dots in filename (e.g. clip..v1.mp4) are accepted."""
+    with open(real_video_path, "rb") as vid_file:
+        data = {"video": (vid_file, "clip..v1.mp4")}
+        response = client.post(
+            "/api/detect/video",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
+
+def test_detect_video_spaces_and_unicode_filename_accepted(client, real_video_path, auth_headers):
+    """Verify spaces and international Unicode characters in filename are accepted."""
+    with open(real_video_path, "rb") as vid_file:
+        data = {"video": (vid_file, "surveillance footage 2026.mp4")}
+        response = client.post(
+            "/api/detect/video",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers
+        )
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+

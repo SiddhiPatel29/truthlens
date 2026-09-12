@@ -398,11 +398,11 @@ def test_empty_filename_preserves_400_no_scan_created(client, app, auth_headers_
 
 def test_corrupt_video_content_preserves_400_no_scan_created(client, app, auth_headers_a):
     """
-    8. Corrupted/unreadable video byte stream:
+    8. Corrupted video byte stream with valid magic bytes:
        - Returns HTTP 400 with PROCESSING_ERROR.
        - No Scan or ScanResult record is created in the database.
     """
-    data = {"video": (io.BytesIO(b"corrupted video binary stream"), "broken.mp4")}
+    data = {"video": (io.BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00corrupt_payload"), "broken.mp4")}
     response = client.post(
         "/api/detect/video",
         data=data,
@@ -703,4 +703,87 @@ def test_oversized_decoded_frame_persists_no_scan(
     with app.app_context():
         assert Scan.query.count() == 0
         assert ScanResult.query.count() == 0
+
+
+# ===========================================================================
+# 14. Phase 5 Step 5: Video Magic-Byte and Filename Persistence Invariants
+# ===========================================================================
+
+def test_invalid_video_magic_bytes_preserves_400_no_scan_created(client, app, auth_headers_a):
+    """
+    14.1. Arbitrary random bytes with .mp4 extension:
+        - Returns HTTP 400 with INVALID_FORMAT.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"video": (io.BytesIO(b"random non-video bytes here"), "payload.mp4")}
+    response = client.post(
+        "/api/detect/video",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_video_path_traversal_filename_preserves_400_no_scan_created(client, app, real_video_path, auth_headers_a):
+    """
+    14.2. Filename path traversal attempt:
+        - Returns HTTP 400 with INVALID_FILE.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    with open(real_video_path, "rb") as vid_file:
+        data = {"video": (vid_file, "../../evil_traversal.mp4")}
+        response = client.post(
+            "/api/detect/video",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_video_double_dot_filename_persists_scan(client, app, real_video_path, auth_headers_a, auth_user_a):
+    """
+    14.3. Legitimate double dot in filename (e.g. clip..v1.mp4):
+        - Returns HTTP 200.
+        - Persists Scan with scan.filename == 'clip..v1.mp4'.
+    """
+    with open(real_video_path, "rb") as vid_file:
+        data = {"video": (vid_file, "clip..v1.mp4")}
+        response = client.post(
+            "/api/detect/video",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 200
+    assert response.is_json
+
+    with app.app_context():
+        assert Scan.query.count() == 1
+        scan = Scan.query.filter_by(user_id=auth_user_a["id"]).first()
+        assert scan is not None
+        assert scan.filename == "clip..v1.mp4"
+        assert scan.status == "COMPLETED"
+        assert scan.result is not None
+
 

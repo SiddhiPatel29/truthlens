@@ -7,8 +7,8 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 ## 1. Automated Unit & Integration Tests (Pytest)
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
-- **Execution Date**: 2026-09-08
-- **Result Summary**: **234 passed, 0 failed, 0 skipped in 51.27s**
+- **Execution Date**: 2026-09-12
+- **Result Summary**: **309 passed, 0 failed, 0 skipped in 83.47s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -297,6 +297,19 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/scans/<owned_id>` | GET | `Authorization: Bearer <valid>` (User A detail) | 200 | 200 | True | **PASSED** |
 | `/api/scans/<unowned_id>` | GET | `Authorization: Bearer <valid>` (IDOR test) | 404 | 404 | False | **PASSED** |
 | `/api/scans/999999` | GET | `Authorization: Bearer <valid>` (Not found) | 404 | 404 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Random bytes as .jpg, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (PNG header with .jpg, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Path traversal `../../evil.jpg`, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Double-dot `audit..v1.jpg`, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Random bytes as .mp4, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (MOV with arbitrary box `moov`, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Path traversal `..\..\evil.mp4`, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Double-dot `clip..v1.mp4`, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Random bytes as .wav, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (MP3 ID3 header with .wav, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (RIFF non-WAVE AVI with .wav, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Path traversal `sub/folder/evil.wav`, Bearer token) | 400 | 400 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Double-dot `recording..v1.wav`, Bearer token) | 200 | 200 | True | **PASSED** |
 
 ---
 
@@ -314,4 +327,9 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Stateless JWT claims | Code inspection & unit test | **PASSED** | Tokens contain only `sub`, `iat`, `exp` |
 | Password hash leak prevention | Code inspection & test | **PASSED** | Password hashes never exposed via `/api/auth/login` or `/api/auth/me` |
 | Centralized error bubbling | Unit test verification | **PASSED** | Route errors not masked as 401; safely return HTTP 500 |
+| Magic-byte validation (SEC-04) | Pytest & live verification | **PASSED** | Bounded 32-byte header checks prevent extension spoofing across image, video, audio |
+| Filename security (SEC-04) | Pytest & live verification | **PASSED** | Path traversal, drive letters, control chars rejected; ordinary double dots & unicode accepted |
+| Deterministic stream rewind | Unit test in test_file_validator.py | **PASSED** | Stream position reliably preserved via `finally: stream.seek(pos)` |
+| Zero-scan persistence invariant | Persistence test assertions | **PASSED** | Rejections at validator boundary create 0 Scan and 0 ScanResult records |
+
 

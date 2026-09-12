@@ -543,8 +543,9 @@ def test_authentic_audio_persists_authentic_prediction(client, app, auth_headers
         "lip_sync_discrepancies": []
     }
 
+    valid_wav = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     with patch.object(AudioDetectionService, "analyze_audio", return_value=mock_result):
-        data = {"audio": (io.BytesIO(b"fake wav data"), "authentic_voice.wav")}
+        data = {"audio": (io.BytesIO(valid_wav), "authentic_voice.wav")}
         response = client.post(
             "/api/detect/audio",
             data=data,
@@ -611,7 +612,7 @@ def test_empty_audio_persists_no_scan(client, app, auth_headers_a):
     assert response.status_code == 400
     json_data = response.get_json()
     assert json_data["success"] is False
-    assert json_data["error_code"] == "PROCESSING_ERROR"
+    assert json_data["error_code"] == "INVALID_FORMAT"
 
     with app.app_context():
         assert Scan.query.count() == 0
@@ -671,10 +672,11 @@ def test_zero_samples_audio_persists_no_scan(client, app, auth_headers_a):
         - Decoded buffer with size 0 fails with HTTP 400.
         - Verifies Scan count == 0 and ScanResult count == 0.
     """
+    valid_wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
     with patch("scipy.io.wavfile.read", return_value=(16000, np.array([], dtype=np.float32))):
         response = client.post(
             "/api/detect/audio",
-            data={"audio": (io.BytesIO(b"dummy"), "zero_samples.wav")},
+            data={"audio": (io.BytesIO(valid_wav_header), "zero_samples.wav")},
             content_type="multipart/form-data",
             headers=auth_headers_a
         )
@@ -687,4 +689,87 @@ def test_zero_samples_audio_persists_no_scan(client, app, auth_headers_a):
     with app.app_context():
         assert Scan.query.count() == 0
         assert ScanResult.query.count() == 0
+
+
+# ===========================================================================
+# 13. Phase 5 Step 5: Audio Magic-Byte and Filename Persistence Invariants
+# ===========================================================================
+
+def test_invalid_audio_magic_bytes_preserves_400_no_scan_created(client, app, auth_headers_a):
+    """
+    13.1. Arbitrary random bytes with .wav extension:
+        - Returns HTTP 400 with INVALID_FORMAT.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    data = {"audio": (io.BytesIO(b"random non-audio bytes here"), "payload.wav")}
+    response = client.post(
+        "/api/detect/audio",
+        data=data,
+        content_type="multipart/form-data",
+        headers=auth_headers_a
+    )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FORMAT"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_audio_path_traversal_filename_preserves_400_no_scan_created(client, app, real_audio_path, auth_headers_a):
+    """
+    13.2. Filename path traversal attempt:
+        - Returns HTTP 400 with INVALID_FILE.
+        - Verifies Scan count == 0 and ScanResult count == 0.
+    """
+    with open(real_audio_path, "rb") as aud_file:
+        data = {"audio": (aud_file, "../../evil_traversal.wav")}
+        response = client.post(
+            "/api/detect/audio",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 400
+    assert response.is_json
+    json_data = response.get_json()
+    assert json_data["success"] is False
+    assert json_data["error_code"] == "INVALID_FILE"
+
+    with app.app_context():
+        assert Scan.query.count() == 0
+        assert ScanResult.query.count() == 0
+
+
+def test_audio_double_dot_filename_persists_scan(client, app, real_audio_path, auth_headers_a, auth_user_a):
+    """
+    13.3. Legitimate double dot in filename (e.g. recording..final.wav):
+        - Returns HTTP 200.
+        - Persists Scan with scan.filename == 'recording..final.wav'.
+    """
+    with open(real_audio_path, "rb") as aud_file:
+        data = {"audio": (aud_file, "recording..final.wav")}
+        response = client.post(
+            "/api/detect/audio",
+            data=data,
+            content_type="multipart/form-data",
+            headers=auth_headers_a
+        )
+
+    assert response.status_code == 200
+    assert response.is_json
+
+    with app.app_context():
+        assert Scan.query.count() == 1
+        scan = Scan.query.filter_by(user_id=auth_user_a["id"]).first()
+        assert scan is not None
+        assert scan.filename == "recording..final.wav"
+        assert scan.status == "COMPLETED"
+        assert scan.result is not None
+
 

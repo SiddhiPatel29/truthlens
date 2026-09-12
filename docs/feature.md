@@ -427,6 +427,53 @@ This document records the features implemented during each development phase of 
   - Complete test suite: **234 passed out of 234 tests in 51.27s**.
 - **Current Status**: Complete.
 
+---
+
+## 22. File Format / Magic-Byte Validation & Filename Security Hardening (Phase 5 Step 5)
+- **Status**: Completed (Phase 5 Step 5).
+- **Reason**: Protect TruthLens against file extension spoofing (arbitrary executables/scripts disguised as media files) and filename-based path traversal, alternate data stream abuse, control character injection, and directory navigation attacks.
+- **Files Changed / Created**:
+  - `backend/utils/file_validator.py` (Modified - implemented bounded stream prefix read with deterministic rewind; added magic-byte signature validation for images, videos, and audio; added `is_safe_filename` with length, control char, path separator, drive letter, and path traversal checks; standardized error codes)
+  - `tests/test_file_validator.py` (Created - 26 unit tests for filename security, stream prefix rewind, format signatures, and error codes)
+  - `tests/test_image_detection.py` (Modified - updated unsupported extension error code to `INVALID_FORMAT`, corrupt content test with valid JPEG prefix, added 7 magic-byte and filename security tests)
+  - `tests/test_image_persistence.py` (Modified - updated unsupported extension error code, corrupt content test, added 3 persistence invariant tests)
+  - `tests/test_video_detection.py` (Modified - updated corrupt content and mocked VideoCapture tests with valid MP4 header, dynamic suffix test with matching container headers, added 7 magic-byte and filename security tests)
+  - `tests/test_video_persistence.py` (Modified - updated corrupt content test, added 3 persistence invariant tests)
+  - `tests/test_audio_detection.py` (Modified - updated empty WAV error code, zero samples payload, invalid rate payload, cleanup on decoder failure payload, added 7 magic-byte and filename security tests)
+  - `tests/test_audio_persistence.py` (Modified - updated empty audio error code, zero-sample payload, mock payload, added 3 persistence invariant tests)
+  - `docs/decision.md` (Updated - added Decision 27)
+  - `docs/flow.md` (Updated - updated Image, Video, and Audio detection flows with multi-layer validation)
+  - `docs/feature.md` (Updated - added Feature 22)
+  - `docs/bug.md` (Updated - added Bug 9 SEC-04)
+  - `docs/test-checklist.md` (Updated - updated test counts and matrices)
+  - `docs/context.md` (Updated - updated Phase 5 roadmap status)
+  - `docs/api/backend-api.md` (Updated - updated API documentation with error codes and validation requirements)
+- **Implementation**:
+  - **Bounded Stream Reading & Deterministic Rewind**: `read_file_prefix(file_storage, 32)` reads only the initial 32 bytes and deterministically executes `stream.seek(pos)` in a `finally:` block, preventing consumption of the file stream for downstream decoders.
+  - **Format-to-Signature Matching**:
+    - Image: JPEG (`\xff\xd8\xff`), PNG (`\x89PNG\r\n\x1a\n`), WebP (`RIFF....WEBP`).
+    - Video: MP4 (`ftyp` at bytes 4..8), MOV (conservative `ftyp` check at bytes 4..8), AVI (`RIFF....AVI ` / `AVIX`), MKV (`\x1a\x45\xdf\xa3`).
+    - Audio: WAV only (`RIFF....WAVE` / `RIFX....WAVE`).
+  - **Path Traversal & Filename Security**:
+    - Rejects path separators (`/`, `\`), Windows drive letters (`:`), control characters and null bytes (`ord < 32 or ord == 127`), excessive length (> 255 chars), dot directory navigation (`.`, `..`), dot prefixes/suffixes, and leading/trailing whitespace.
+    - Explicitly allows legitimate ordinary characters: spaces, international Unicode characters, and ordinary double dots (e.g. `audit..v1.jpg`).
+  - **Standardized Error Codes**:
+    - `INVALID_FILE` (HTTP 400): File missing, empty filename, or unsafe filename.
+    - `INVALID_FORMAT` (HTTP 400): Disallowed extension, signature mismatch, or extension-content mismatch.
+    - `PROCESSING_ERROR` (HTTP 400): Malformed internal stream failing decoder execution.
+  - **Zero-Scan Persistence Invariant**: All invalid or spoofed uploads are rejected at the validator boundary before reaching detection services, creating exactly 0 `Scan` or `ScanResult` database records.
+- **Tests**:
+  - `tests/test_file_validator.py` (26 passed).
+  - `tests/test_image_detection.py` (24 passed).
+  - `tests/test_image_persistence.py` (16 passed).
+  - `tests/test_video_detection.py` (31 passed).
+  - `tests/test_video_persistence.py` (17 passed).
+  - `tests/test_audio_detection.py` (31 passed).
+  - `tests/test_audio_persistence.py` (21 passed).
+  - Complete test suite: **309 passed out of 309 tests in 83.47s**.
+- **Current Status**: Complete.
+
+
 
 
 

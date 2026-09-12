@@ -183,8 +183,11 @@ None.
 1. Request must contain a valid Bearer JWT in the `Authorization` header.
 2. Request must be `multipart/form-data` with form field name `image`.
 3. File must be present and filename non-empty.
-4. Extension must be in `{"png", "jpg", "jpeg", "webp"}`.
-5. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
+4. Filename must be safe: length <= 255, no path traversal separators (`/`, `\`), no drive letters or ADS colons (`:`), no control characters or null bytes, no directory navigation (`.` or `..`), no leading/trailing whitespace. Legitimate double dots (e.g. `audit..v1.jpg`), spaces, and international Unicode are accepted. (Violations return 400 `INVALID_FILE`).
+5. Extension must be in `{"png", "jpg", "jpeg", "webp"}`. (Violations return 400 `INVALID_FORMAT`).
+6. Magic-byte signature must match the declared format: JPEG (`\xff\xd8\xff`), PNG (`\x89PNG\r\n\x1a\n`), WebP (`RIFF....WEBP`). Bounded 32-byte header inspection with deterministic stream rewind. (Violations return 400 `INVALID_FORMAT`).
+7. Dimensions must not exceed 4096x4096px or 16,777,216 total pixels. (Violations return 400 `PROCESSING_ERROR`).
+8. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
 
 ### Success Response (`200 OK`)
 ```json
@@ -242,13 +245,22 @@ None.
     "error_code": "MISSING_FILE"
   }
   ```
-- **Disallowed extension or empty file (`400 Bad Request`)**:
+- **Unsafe filename or path traversal attempt (`400 Bad Request`)**:
   ```json
   {
     "success": false,
-    "message": "Invalid image format. Allowed: jpeg, jpg, png, webp",
+    "message": "Invalid filename: Filename cannot contain path separators.",
     "data": null,
     "error_code": "INVALID_FILE"
+  }
+  ```
+- **Disallowed extension or magic-byte mismatch (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "File content does not match expected JPEG signature for .jpg.",
+    "data": null,
+    "error_code": "INVALID_FORMAT"
   }
   ```
 - **Unreadable / corrupted image stream (`400 Bad Request`)**:
@@ -289,11 +301,13 @@ None.
 1. Request must contain a valid Bearer JWT in the `Authorization` header.
 2. Request must be `multipart/form-data` with form field name `video`.
 3. File must be present and filename non-empty.
-4. Extension must be in `{"mp4", "mov", "avi", "mkv"}`.
-5. Video file must have at least 1 readable frame.
-6. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
-7. Video duration must not exceed 120 seconds (`MAX_VIDEO_DURATION_SECONDS`). Videos exceeding 120s are rejected with HTTP 400 `PROCESSING_ERROR`.
-8. Video container resolution and decoded frames must not exceed 4096x4096 px or 16,777,216 pixels (`MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `MAX_VIDEO_PIXELS`). Oversized videos are rejected with HTTP 400 `PROCESSING_ERROR`.
+4. Filename must be safe: length <= 255, no path traversal separators (`/`, `\`), no drive letters or ADS colons (`:`), no control characters or null bytes, no directory navigation (`.` or `..`), no leading/trailing whitespace. Legitimate double dots (e.g. `clip..v1.mp4`), spaces, and international Unicode are accepted. (Violations return 400 `INVALID_FILE`).
+5. Extension must be in `{"mp4", "mov", "avi", "mkv"}`. (Violations return 400 `INVALID_FORMAT`).
+6. Magic-byte signature must match the declared container: MP4 (`ftyp` at bytes 4..8), MOV (conservative ISOBMFF `ftyp` at bytes 4..8), AVI (`RIFF....AVI ` / `AVIX`), MKV (`\x1a\x45\xdf\xa3`). Bounded 32-byte header inspection with deterministic stream rewind. (Violations return 400 `INVALID_FORMAT`).
+7. Video file must have at least 1 readable frame.
+8. Total payload must not exceed `MAX_CONTENT_LENGTH` (50 MB).
+9. Video duration must not exceed 120 seconds (`MAX_VIDEO_DURATION_SECONDS`). Videos exceeding 120s are rejected with HTTP 400 `PROCESSING_ERROR`.
+10. Video container resolution and decoded frames must not exceed 4096x4096 px or 16,777,216 pixels (`MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `MAX_VIDEO_PIXELS`). Oversized videos are rejected with HTTP 400 `PROCESSING_ERROR`.
 
 ### Success Response (`200 OK`)
 ```json
@@ -352,20 +366,20 @@ None.
     "error_code": "MISSING_FILE"
   }
   ```
-- **Empty file (`400 Bad Request`)**:
+- **Empty file or unsafe filename (`400 Bad Request`)**:
   ```json
   {
     "success": false,
-    "message": "No video file selected.",
+    "message": "Invalid filename: Filename cannot contain path separators.",
     "data": null,
     "error_code": "INVALID_FILE"
   }
   ```
-- **Unsupported format (`400 Bad Request`)**:
+- **Unsupported format or signature mismatch (`400 Bad Request`)**:
   ```json
   {
     "success": false,
-    "message": "Invalid video format. Allowed: avi, mkv, mov, mp4",
+    "message": "File content does not match expected MP4 container signature for .mp4.",
     "data": null,
     "error_code": "INVALID_FORMAT"
   }
@@ -435,8 +449,11 @@ None.
 1. Request must contain a valid Bearer JWT in the `Authorization` header.
 2. Request must be `multipart/form-data` with form field name `audio`.
 3. File must be present and filename non-empty.
-4. Extension must be in `{"wav"}`.
-5. Max payload size: 50 MB.
+4. Filename must be safe: length <= 255, no path traversal separators (`/`, `\`), no drive letters or ADS colons (`:`), no control characters or null bytes, no directory navigation (`.` or `..`), no leading/trailing whitespace. Legitimate double dots (e.g. `recording..v1.wav`), spaces, and international Unicode are accepted. (Violations return 400 `INVALID_FILE`).
+5. Extension must be in `{"wav"}`. (Violations return 400 `INVALID_FORMAT`).
+6. Magic-byte signature must match WAV container: `RIFF....WAVE` or `RIFX....WAVE`. Bounded 32-byte header inspection with deterministic stream rewind. (Violations return 400 `INVALID_FORMAT`).
+7. Decoded audio buffer must contain at least 1 readable sample (`data.size > 0`) and sample rate must be positive (`sample_rate > 0`). (Violations return 400 `PROCESSING_ERROR`).
+8. Max payload size: 50 MB.
 
 ### Success Response (`200 OK`)
 ```json
@@ -503,20 +520,20 @@ None.
     "error_code": "MISSING_FILE"
   }
   ```
-- **Empty file (`400 Bad Request`)**:
+- **Empty file or unsafe filename (`400 Bad Request`)**:
   ```json
   {
     "success": false,
-    "message": "No audio file selected.",
+    "message": "Invalid filename: Filename cannot contain path separators.",
     "data": null,
     "error_code": "INVALID_FILE"
   }
   ```
-- **Unsupported format (`400 Bad Request`)**:
+- **Unsupported format or signature mismatch (`400 Bad Request`)**:
   ```json
   {
     "success": false,
-    "message": "Invalid audio format. Allowed: wav",
+    "message": "File content does not match expected WAV container signature for .wav.",
     "data": null,
     "error_code": "INVALID_FORMAT"
   }

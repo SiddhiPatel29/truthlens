@@ -138,8 +138,10 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
      - If missing: calls api_response(False, "...", None, "MISSING_FILE", 400)
   2. Extracts file = request.files["image"]
   3. Validates file via [backend/utils/file_validator.py: validate_image_file(file)]
-     - Checks file.filename != ""
-     - Checks extension against ALLOWED_IMAGE_EXTENSIONS ("png", "jpg", "jpeg", "webp")
+     - File presence and non-empty filename check (returns 400 INVALID_FILE)
+     - Filename safety check: is_safe_filename(file.filename) verifies length <= 255, no control/null chars, no path separators (/ or \), no colons/drive letters, no dot directory navigation, no dot prefixes/suffixes (returns 400 INVALID_FILE)
+     - Extension check: verifies extension in ALLOWED_IMAGE_EXTENSIONS ("png", "jpg", "jpeg", "webp") (returns 400 INVALID_FORMAT)
+     - Bounded magic-byte check: read_file_prefix reads 32 bytes and deterministically rewinds stream; validate_image_signature validates JPEG (\xff\xd8\xff), PNG (\x89PNG\r\n\x1a\n), or WebP (RIFF....WEBP) (returns 400 INVALID_FORMAT)
      - If invalid: calls api_response(False, err_msg, None, err_code, 400)
   4. Reads raw bytes: file_bytes = file.read()
   │
@@ -224,7 +226,10 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
   1. Checks "video" in request.files
      - If missing: returns api_response(False, "...", None, "MISSING_FILE", 400)
   2. Validates file via [backend/utils/file_validator.py: validate_video_file(file)]
-     - Verifies filename not empty and extension in {"mp4", "mov", "avi", "mkv"}
+     - File presence and non-empty filename check (returns 400 INVALID_FILE)
+     - Filename safety check: is_safe_filename(file.filename) verifies length <= 255, no control/null chars, no path separators (/ or \), no colons/drive letters, no dot directory navigation, no dot prefixes/suffixes (returns 400 INVALID_FILE)
+     - Extension check: verifies extension in ALLOWED_VIDEO_EXTENSIONS ("mp4", "mov", "avi", "mkv") (returns 400 INVALID_FORMAT)
+     - Bounded magic-byte check: read_file_prefix reads 32 bytes and rewinds stream; validate_video_signature validates MP4 (ftyp at 4..8), MOV (conservative ftyp at 4..8), AVI (RIFF....AVI / AVIX), or MKV (1A 45 DF A3) (returns 400 INVALID_FORMAT)
      - If invalid: returns api_response(False, err_msg, None, err_code, 400)
   │
   ▼
@@ -309,7 +314,10 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
   1. Checks "audio" in request.files
      - If missing: returns api_response(False, "...", None, "MISSING_FILE", 400)
   2. Validates file via [backend/utils/file_validator.py: validate_audio_file(file)]
-     - Verifies filename not empty and extension in {"wav"} (Option A: WAV-only policy for scipy decoder)
+     - File presence and non-empty filename check (returns 400 INVALID_FILE)
+     - Filename safety check: is_safe_filename(file.filename) verifies length <= 255, no control/null chars, no path separators (/ or \), no colons/drive letters, no dot directory navigation, no dot prefixes/suffixes (returns 400 INVALID_FILE)
+     - Extension check: verifies extension in ALLOWED_AUDIO_EXTENSIONS ("wav") (Option A: WAV-only policy for scipy decoder) (returns 400 INVALID_FORMAT)
+     - Bounded magic-byte check: read_file_prefix reads 32 bytes and rewinds stream; validate_audio_signature validates WAV (RIFF....WAVE or RIFX....WAVE) (returns 400 INVALID_FORMAT)
      - If invalid: returns api_response(False, err_msg, None, err_code, 400)
   │
   ▼

@@ -184,5 +184,40 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
 - **Status**:
   Fixed.
 
+---
+
+## Bug 9: File Extension Spoofing Exposure and Unsafe Filename Path Traversal Ingestion (SEC-04)
+
+- **Problem**:
+  1. `file_validator.py` verified media uploads solely by checking the filename extension against an allowed set (`ALLOWED_IMAGE_EXTENSIONS`, `ALLOWED_VIDEO_EXTENSIONS`, `ALLOWED_AUDIO_EXTENSIONS`). The underlying byte stream was never validated for expected container headers or magic bytes. An attacker or client could upload arbitrary executable, script, or binary payloads disguised with a valid extension (e.g. `payload.exe` renamed to `evidence.jpg` or `trojan.bat` named to `audio.wav`), passing validator checks and feeding raw binary into image/video/audio decoders.
+  2. Client-provided filenames were ingested without safety or traversal sanitization. Filenames containing path traversal sequences (`../../`, `..\..\`), Windows drive letters (`C:`), alternate data streams (`:`), control characters (`\x00`), or leading/trailing whitespace could cause path traversal issues, file write errors, or log pollution.
+- **Cause**:
+  1. Complete absence of magic-byte file signature verification on upload streams.
+  2. Incomplete filename validation: only checked `filename != ""` and `'.' in filename`.
+- **Location**:
+  `backend/utils/file_validator.py`
+  `backend/routes/image_routes.py`
+  `backend/routes/video_routes.py`
+  `backend/routes/audio_routes.py`
+- **Fix**:
+  1. Implemented `read_file_prefix(file_storage, max_bytes=32)` to safely read bounded header bytes and deterministically rewind the stream via `try ... finally: stream.seek(pos)`.
+  2. Added container signature validators:
+     - Images: JPEG (`\xff\xd8\xff`), PNG (`\x89PNG\r\n\x1a\n`), WebP (`RIFF....WEBP`).
+     - Videos: MP4 (`ftyp` at bytes 4..8), MOV (conservative ISOBMFF `ftyp` at bytes 4..8), AVI (`RIFF....AVI ` / `AVIX`), MKV (`\x1a\x45\xdf\xa3`).
+     - Audio: WAV only (`RIFF....WAVE` / `RIFX....WAVE`).
+  3. Implemented `is_safe_filename(filename)`:
+     - Rejects path separators (`/`, `\`), Windows drive letters and ADS colons (`:`), control characters and null bytes (`ord < 32 or ord == 127`), excessive length (> 255 chars), dot directory navigation (`.`, `..`), dot prefixes/suffixes, and leading/trailing whitespace.
+     - Safely permits legitimate ordinary filenames with double dots (e.g. `audit..v1.jpg`), spaces, and international Unicode characters.
+  4. Standardized error codes: `INVALID_FILE` for filename issues, `INVALID_FORMAT` for extension or signature mismatches.
+  5. Guaranteed zero database persistence on rejected uploads.
+- **Verification**:
+  - `tests/test_file_validator.py`: 26 comprehensive unit tests covering all safety and signature rules.
+  - Integration & persistence tests across `tests/test_image_detection.py`, `tests/test_image_persistence.py`, `tests/test_video_detection.py`, `tests/test_video_persistence.py`, `tests/test_audio_detection.py`, `tests/test_audio_persistence.py`.
+  - In-process live verification script `scratch/verify_live_magic_bytes_and_filename.py` passed all checks.
+  - Full regression test suite: 309 tests passed.
+- **Status**:
+  Fixed.
+
+
 
 

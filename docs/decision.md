@@ -628,6 +628,46 @@ Enforce strict image dimension and pixel limits (`MAX_IMAGE_WIDTH = 4096`, `MAX_
    - Lip-sync desynchronization event window extraction.
    - Risk level categorization (`HIGH`, `MEDIUM`, `LOW`).
 
+---
+
+## Decision 27: File Signature (Magic-Byte) Validation, Conservative Container Checks, and Path-Traversal-Resistant Filename Security (Phase 5 Step 5)
+
+### Decision
+1. **Bounded Magic-Byte Validation**:
+   Implement bounded byte signature verification in `backend/utils/file_validator.py` (`read_file_prefix`) reading at most 32 bytes from client uploads and deterministically rewinding the underlying stream using `try ... finally: stream.seek(pos)`.
+2. **Format-to-Signature Mapping**:
+   Enforce signature validation strictly for formats accepted by TruthLens:
+   - Image: JPEG (`\xff\xd8\xff`), PNG (`\x89PNG\r\n\x1a\n`), WebP (`RIFF....WEBP`).
+   - Video: MP4 (`ftyp` at bytes 4..8), MOV (conservative ISO Base Media File Format `ftyp` check at bytes 4..8, rejecting arbitrary atom/box names like `moov`, `wide`, `skip`, `free`), AVI (`RIFF....AVI ` or `RIFF....AVIX`), MKV (`\x1a\x45\xdf\xa3`).
+   - Audio: WAV only (`RIFF....WAVE` or `RIFX....WAVE`).
+3. **Filename Security**:
+   Implement `is_safe_filename` to reject path separators (`/`, `\`), Windows drive letters and ADS colons (`:`), control characters and null bytes (`ord < 32 or ord == 127`), excessive length (> 255 chars), directory navigation references (`.` or `..`), dot prefixes/suffixes, and leading/trailing whitespace.
+   Do not blindly reject filenames containing `..`; legitimate filenames with ordinary double dots (e.g. `audit..v1.jpg`), spaces, and international Unicode characters are explicitly permitted.
+4. **Standardized Error Codes**:
+   - `INVALID_FILE` (HTTP 400): Missing file payload, empty filename, or unsafe filename (traversal, control chars, colons, excessive length).
+   - `INVALID_FORMAT` (HTTP 400): Disallowed file extension, magic-byte mismatch, or extension-content mismatch.
+   - `PROCESSING_ERROR` (HTTP 400): Files with valid signatures whose internal stream cannot be decoded by OpenCV/SciPy.
+5. **Zero-Scan Persistence Invariant**:
+   Files rejected during filename safety, extension checking, or magic-byte verification are rejected at the route boundary before invoking detection services, ensuring exactly 0 `Scan` or `ScanResult` database records are created.
+
+### Reasons & Architectural Principles
+
+1. **Extension Spoofing Exposure**:
+   Relying exclusively on file extensions allows arbitrary binary, executable, or text payloads disguised as media files (e.g. `malware.exe` renamed to `evidence.jpg`) to be passed to decoders. Validating leading magic bytes ensures content matches the declared container before resource allocation.
+
+2. **Conservative MOV Validation**:
+   QuickTime/ISOBMFF containers use an `ftyp` atom at bytes 4..8. Permitting arbitrary box names (`moov`, `mdat`, `wide`, `skip`, `free`) creates overly permissive validation that could accept corrupted or malformed streams. Requiring `ftyp` at bytes 4..8 provides conservative, robust validation without requiring a complex, full container parser.
+
+3. **Non-Destructive Stream Rewind**:
+   Validation must not consume the upload stream. Wrapping stream reads with `try ... finally: stream.seek(pos)` guarantees that downstream consumers (`file.read()` for images/audio or tempfile writing for videos) receive the complete file stream from offset 0.
+
+4. **Precision in Filename Security**:
+   Rejecting any filename with `..` breaks legitimate forensic naming conventions (e.g. `audit..v1.jpg`). Using `PurePosixPath` and `PureWindowsPath` traversal checks alongside explicit separator and colon checks blocks real path traversal (`../../`, `..\..\`, `/etc/`, `C:\`) while preserving valid double-dot basenames.
+
+5. **Error Code Consistency**:
+   Standardizing image format rejections to `INVALID_FORMAT` aligns image detection with video and audio modalities, establishing an unambiguous API contract across the TruthLens platform.
+
+
 
 
 
