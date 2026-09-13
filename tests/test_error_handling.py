@@ -39,12 +39,32 @@ def test_413_payload_too_large_returns_json():
         MAX_CONTENT_LENGTH = 100  # 100 bytes max
         JWT_SECRET_KEY = "test-tiny-jwt-secret-key"
         
+    from backend.database.db import db
+    from backend.database.models import User
+
     app = create_app(TinyConfig)
+    with app.app_context():
+        db.create_all()
+        user = User.query.first()
+        if not user:
+            user = User(
+                name="Tiny User",
+                email="tiny_unique@example.com",
+                password_hash="fakehash",
+                is_active=True
+            )
+            db.session.add(user)
+            db.session.commit()
+        else:
+            user.is_active = True
+            db.session.commit()
+        user_id = user.id
+
     tiny_client = app.test_client()
 
     now = int(time.time())
     token = jwt.encode(
-        {"sub": "1", "iat": now, "exp": now + 3600},
+        {"sub": str(user_id), "iat": now, "exp": now + 3600},
         "test-tiny-jwt-secret-key",
         algorithm="HS256"
     )

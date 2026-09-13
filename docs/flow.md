@@ -56,7 +56,11 @@ Body: { "text": "Artificial intelligence synthesis has progressed rapidly..." }
   2. Extracts token and calls AuthService.verify_token(token)
      - Expired: returns 401 TOKEN_EXPIRED
      - Invalid signature/claims: returns 401 INVALID_TOKEN
-  3. Validates positive integer sub claim and binds g.current_user_id = user_id
+  3. Validates positive integer sub claim: user_id = int(payload["sub"])
+  4. Database User & Active Verification:
+     - Queries User via db.session.get(User, user_id, populate_existing=True)
+     - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
+  5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
 [backend/routes/text_routes.py: detect_text()]
@@ -133,7 +137,11 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
   2. Extracts token and calls AuthService.verify_token(token)
      - Expired: returns 401 TOKEN_EXPIRED
      - Invalid signature/claims: returns 401 INVALID_TOKEN
-  3. Validates positive integer sub claim and binds g.current_user_id = user_id
+  3. Validates positive integer sub claim: user_id = int(payload["sub"])
+  4. Database User & Active Verification:
+     - Queries User via db.session.get(User, user_id, populate_existing=True)
+     - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
+  5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
 [backend/routes/image_routes.py: detect_image()]
@@ -222,7 +230,11 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
   2. Extracts token and calls AuthService.verify_token(token)
      - Expired: returns 401 TOKEN_EXPIRED
      - Invalid signature/claims: returns 401 INVALID_TOKEN
-  3. Validates positive integer sub claim and binds g.current_user_id = user_id
+  3. Validates positive integer sub claim: user_id = int(payload["sub"])
+  4. Database User & Active Verification:
+     - Queries User via db.session.get(User, user_id, populate_existing=True)
+     - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
+  5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
 [backend/routes/video_routes.py: detect_video()]
@@ -310,7 +322,11 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
   2. Extracts token and calls AuthService.verify_token(token)
      - Expired: returns 401 TOKEN_EXPIRED
      - Invalid signature/claims: returns 401 INVALID_TOKEN
-  3. Validates positive integer sub claim and binds g.current_user_id = user_id
+  3. Validates positive integer sub claim: user_id = int(payload["sub"])
+  4. Database User & Active Verification:
+     - Queries User via db.session.get(User, user_id, populate_existing=True)
+     - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
+  5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
 [backend/routes/audio_routes.py: detect_audio()]
@@ -455,11 +471,15 @@ Body:
   ▼
 [backend/services/auth_service.py: AuthService.register_user(body)]
   1. Name Validation:
-     - Verifies name is non-empty string; strips surrounding whitespace
-     - If invalid: raises AuthValidationError("Field 'name' is required.", "MISSING_FIELD")
+     - Verifies name is non-empty string; strips surrounding whitespace: clean_name = raw_name.strip()
+     - Enforces maximum length: len(clean_name) <= MAX_NAME_LENGTH (120)
+       (raises AuthValidationError("Name must not exceed 120 characters.", "NAME_TOO_LONG") if > 120)
+     - If empty or invalid: raises AuthValidationError("Field 'name' is required.", "MISSING_FIELD")
   2. Email Validation & Normalization:
      - Verifies email is non-empty string
      - Normalizes: raw_email.strip().lower() -> "alice.smith@example.com"
+     - Enforces maximum length: len(normalized_email) <= MAX_EMAIL_LENGTH (255)
+       (raises AuthValidationError("Email must not exceed 255 characters.", "EMAIL_TOO_LONG") if > 255)
      - Validates against regex: r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
      - If invalid: raises AuthValidationError("Invalid email address format.", "INVALID_EMAIL")
   3. Password Validation:
@@ -602,11 +622,23 @@ Headers: Authorization: Bearer <access_token>
      - Checks signature and claim integrity: raises jwt.InvalidTokenError if tampered or missing
   │
   ▼
-  4. Claim Validation & Context Binding:
+  4. Claim Validation:
      - If jwt.ExpiredSignatureError: returns api_response(False, "Authentication token has expired.", None, "TOKEN_EXPIRED", 401)
      - If jwt.InvalidTokenError: returns api_response(False, "Invalid authentication token.", None, "INVALID_TOKEN", 401)
-     - Validates payload["sub"] as positive integer
-     - Binds user ID to request context: g.current_user_id = int(payload["sub"])
+     - Validates payload["sub"] as positive integer; extracts user_id = int(payload["sub"])
+  │
+  ▼
+  5. Database User & Active Status Verification:
+     - Queries User record: user = db.session.get(User, user_id, populate_existing=True)
+     - If user is None (deleted/nonexistent): returns api_response(False, "Invalid authentication token.", None, "INVALID_TOKEN", 401)
+     - If not user.is_active (deactivated/suspended): returns api_response(False, "Invalid authentication token.", None, "INVALID_TOKEN", 401)
+     - Anti-enumeration: returns identical generic 401 INVALID_TOKEN for nonexistent and inactive accounts
+  │
+  ▼
+  6. Context Binding:
+     - Binds verified context:
+         g.current_user_id = user_id
+         g.current_user = user
   │
   ▼
 [backend/routes/auth_routes.py: get_current_user()]
@@ -798,7 +830,8 @@ Headers:
 [backend/utils/auth.py: @require_auth]
   1. Validates Authorization: Bearer <token>
   2. Verifies signature, expiration, and required claims via AuthService.verify_token()
-  3. Binds authenticated user ID to g.current_user_id
+  3. Verifies user exists and user.is_active is True via db.session.get(User, user_id, populate_existing=True)
+  4. Binds authenticated user context: g.current_user_id = user_id, g.current_user = user
   │
   ▼
 [backend/routes/scan_routes.py: list_scans()]
@@ -847,7 +880,7 @@ Headers:
   │
   ▼
 [backend/utils/auth.py: @require_auth]
-  Validates Bearer token and binds g.current_user_id
+  Validates Bearer token, verifies active database user, and binds g.current_user_id
   │
   ▼
 [backend/routes/scan_routes.py: get_scan(scan_id)]

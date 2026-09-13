@@ -12,17 +12,20 @@ from backend.database.models import User
 from backend.database.db import db
 from backend.utils.auth import require_auth
 from backend.utils.response import api_response
+from backend.services.auth_service import AuthService
 
 @pytest.fixture(autouse=True)
 def clean_users(app):
     """Ensures a clean user table for each test."""
-    with app.app_context():
-        db.session.query(User).delete()
-        db.session.commit()
+    db.session.rollback()
+    db.session.query(User).delete()
+    db.session.commit()
+    db.session.remove()
     yield
-    with app.app_context():
-        db.session.query(User).delete()
-        db.session.commit()
+    db.session.rollback()
+    db.session.query(User).delete()
+    db.session.commit()
+    db.session.remove()
 
 @pytest.fixture
 def auth_user(app):
@@ -78,17 +81,30 @@ def test_correct_user_id_extracted_from_sub(client, valid_token, auth_user):
     assert body["data"]["user_id"] == auth_user["id"]
 
 def test_g_current_user_id_available_to_route(valid_token, auth_user):
-    """3. g.current_user_id is available to the decorated route."""
+    """3. g.current_user_id and g.current_user are available to the decorated route."""
     from backend.app import create_app
     from tests.conftest import TestConfig
 
     test_app = create_app(TestConfig)
-    captured_id = {}
+    with test_app.app_context():
+        db.create_all()
+        user = User(
+            id=auth_user["id"],
+            name=auth_user["name"],
+            email=auth_user["email"],
+            password_hash="dummy_hash",
+            is_active=True
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    captured_context = {}
 
     @test_app.route("/api/test-context-route", methods=["GET"])
     @require_auth
     def test_context_endpoint():
-        captured_id["user_id"] = g.current_user_id
+        captured_context["user_id"] = g.current_user_id
+        captured_context["user"] = g.current_user
         return api_response(True, "Context verified.", {"captured_id": g.current_user_id})
 
     test_client = test_app.test_client()
@@ -97,7 +113,8 @@ def test_g_current_user_id_available_to_route(valid_token, auth_user):
         headers={"Authorization": f"Bearer {valid_token}"}
     )
     assert response.status_code == 200
-    assert captured_id["user_id"] == auth_user["id"]
+    assert captured_context["user_id"] == auth_user["id"]
+    assert captured_context["user"].id == auth_user["id"]
 
 
 # ===========================================================================
@@ -367,7 +384,7 @@ def test_jwt_remains_signed_using_existing_configuration(client, app, valid_toke
     assert "iat" in decoded
     assert "exp" in decoded
 
-def test_unexpected_server_exception_returns_500_not_masked_as_401(valid_token):
+def test_unexpected_server_exception_returns_500_not_masked_as_401(valid_token, auth_user):
     """
     User Correction Test: Unexpected runtime/server exceptions in protected routes
     must NOT be caught by @require_auth and disguised as 401. They must reach Flask's
@@ -377,6 +394,17 @@ def test_unexpected_server_exception_returns_500_not_masked_as_401(valid_token):
     from tests.conftest import TestConfig
 
     test_app = create_app(TestConfig)
+    with test_app.app_context():
+        db.create_all()
+        user = User(
+            id=auth_user["id"],
+            name=auth_user["name"],
+            email=auth_user["email"],
+            password_hash="dummy_hash",
+            is_active=True
+        )
+        db.session.add(user)
+        db.session.commit()
 
     @test_app.route("/api/test-server-error-route", methods=["GET"])
     @require_auth
@@ -393,3 +421,154 @@ def test_unexpected_server_exception_returns_500_not_masked_as_401(valid_token):
     assert body["success"] is False
     assert body["error_code"] == "INTERNAL_SERVER_ERROR"
     assert "Traceback" not in response.get_data(as_text=True)
+
+
+# ===========================================================================
+# E. Active User & Database Verification Tests (SEC-09)
+# ===========================================================================
+
+def test_inactive_user_token_rejected_with_401(client, app):
+    """21. Token for an inactive user is rejected with HTTP 401 INVALID_TOKEN."""
+    with app.app_context():
+        inactive_user = User(
+            name="Inactive Person",
+            email="inactive@example.com",
+            password_hash=generate_password_hash("ValidPassword123!"),
+            is_active=False
+        )
+        db.session.add(inactive_user)
+        db.session.commit()
+        user_id = inactive_user.id
+
+        secret_key = app.config.get("JWT_SECRET_KEY")
+        now = int(time.time())
+        token = jwt.encode({
+            "sub": str(user_id),
+            "iat": now,
+            "exp": now + 3600
+        }, secret_key, algorithm="HS256")
+
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["success"] is False
+    assert body["error_code"] == "INVALID_TOKEN"
+    assert body["message"] == "Invalid authentication token."
+
+def test_nonexistent_user_token_rejected_with_401(client, app):
+    """22. Token with valid crypto/claims but nonexistent user_id is rejected with HTTP 401."""
+    with app.app_context():
+        secret_key = app.config.get("JWT_SECRET_KEY")
+        now = int(time.time())
+        # Use an ID guaranteed not to exist in clean_users
+        token = jwt.encode({
+            "sub": "999999",
+            "iat": now,
+            "exp": now + 3600
+        }, secret_key, algorithm="HS256")
+
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["success"] is False
+    assert body["error_code"] == "INVALID_TOKEN"
+    assert body["message"] == "Invalid authentication token."
+
+def test_user_deactivated_after_token_issuance_rejected(client, app, auth_user, valid_token):
+    """23. Validly issued token is immediately rejected if user is subsequently deactivated."""
+    # First verify token works
+    res_before = client.get("/api/auth/me", headers={"Authorization": f"Bearer {valid_token}"})
+    assert res_before.status_code == 200
+
+    # Deactivate the user in database
+    with app.app_context():
+        user = db.session.get(User, auth_user["id"])
+        user.is_active = False
+        db.session.commit()
+        db.session.expire_all()
+
+    # Subsequent request must be rejected
+    res_after = client.get("/api/auth/me", headers={"Authorization": f"Bearer {valid_token}"})
+    assert res_after.status_code == 401
+    body = res_after.get_json()
+    assert body["success"] is False
+    assert body["error_code"] == "INVALID_TOKEN"
+
+def test_user_deleted_after_token_issuance_rejected(client, app, auth_user, valid_token):
+    """24. Validly issued token is immediately rejected if user record is deleted."""
+    # First verify token works
+    res_before = client.get("/api/auth/me", headers={"Authorization": f"Bearer {valid_token}"})
+    assert res_before.status_code == 200
+
+    # Delete user from database
+    with app.app_context():
+        user = db.session.get(User, auth_user["id"])
+        db.session.delete(user)
+        db.session.commit()
+        db.session.expire_all()
+
+    # Subsequent request must be rejected
+    res_after = client.get("/api/auth/me", headers={"Authorization": f"Bearer {valid_token}"})
+    assert res_after.status_code == 401
+    body = res_after.get_json()
+    assert body["success"] is False
+    assert body["error_code"] == "INVALID_TOKEN"
+
+def test_auth_service_verify_token_does_not_access_database(app):
+    """25. AuthService.verify_token remains pure cryptographic verification (no DB queries)."""
+    with app.app_context():
+        secret_key = app.config.get("JWT_SECRET_KEY")
+        now = int(time.time())
+        token = jwt.encode({
+            "sub": "888888",
+            "iat": now,
+            "exp": now + 3600
+        }, secret_key, algorithm="HS256")
+
+        # Must succeed and return payload without requiring user 888888 in DB
+        claims = AuthService.verify_token(token)
+        assert claims["sub"] == "888888"
+        assert claims["iat"] == now
+
+def test_generic_authentication_error_prevents_user_enumeration(client, app, auth_user):
+    """26. Nonexistent and inactive user tokens return identical generic error to prevent enumeration."""
+    with app.app_context():
+        secret_key = app.config.get("JWT_SECRET_KEY")
+        now = int(time.time())
+
+        # Token for nonexistent user
+        token_nonexistent = jwt.encode({
+            "sub": "777777",
+            "iat": now,
+            "exp": now + 3600
+        }, secret_key, algorithm="HS256")
+
+        # Inactive user
+        inactive = User(
+            name="Inactive Enum",
+            email="inactive_enum@example.com",
+            password_hash=generate_password_hash("ValidPassword123!"),
+            is_active=False
+        )
+        db.session.add(inactive)
+        db.session.commit()
+        token_inactive = jwt.encode({
+            "sub": str(inactive.id),
+            "iat": now,
+            "exp": now + 3600
+        }, secret_key, algorithm="HS256")
+
+    res_nonexistent = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token_nonexistent}"})
+    res_inactive = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token_inactive}"})
+
+    assert res_nonexistent.status_code == 401
+    assert res_inactive.status_code == 401
+    assert res_nonexistent.get_json() == res_inactive.get_json()
+    assert res_nonexistent.get_json()["error_code"] == "INVALID_TOKEN"
+    assert res_nonexistent.get_json()["message"] == "Invalid authentication token."

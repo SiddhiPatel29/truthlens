@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Standard email validation pattern
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+MAX_NAME_LENGTH = 120
+MAX_EMAIL_LENGTH = 255
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 128
 
@@ -79,6 +81,11 @@ class AuthService:
         if name is None or not isinstance(name, str) or not name.strip():
             raise AuthValidationError("Field 'name' is required.", "MISSING_FIELD")
         clean_name = name.strip()
+        if len(clean_name) > MAX_NAME_LENGTH:
+            raise AuthValidationError(
+                f"Name must not exceed {MAX_NAME_LENGTH} characters.",
+                "NAME_TOO_LONG"
+            )
 
         # 2. Validate and normalize email
         raw_email = data.get("email")
@@ -86,6 +93,11 @@ class AuthService:
             raise AuthValidationError("Field 'email' is required.", "MISSING_FIELD")
         
         normalized_email = raw_email.strip().lower()
+        if len(normalized_email) > MAX_EMAIL_LENGTH:
+            raise AuthValidationError(
+                f"Email must not exceed {MAX_EMAIL_LENGTH} characters.",
+                "EMAIL_TOO_LONG"
+            )
         if not EMAIL_REGEX.match(normalized_email):
             raise AuthValidationError("Invalid email address format.", "INVALID_EMAIL")
 

@@ -10,13 +10,15 @@ from backend.database.db import db
 @pytest.fixture(autouse=True)
 def clean_users(app):
     """Ensures a clean user table for each test."""
-    with app.app_context():
-        db.session.query(User).delete()
-        db.session.commit()
+    db.session.rollback()
+    db.session.query(User).delete()
+    db.session.commit()
+    db.session.remove()
     yield
-    with app.app_context():
-        db.session.query(User).delete()
-        db.session.commit()
+    db.session.rollback()
+    db.session.query(User).delete()
+    db.session.commit()
+    db.session.remove()
 
 def test_register_success(client):
     """Verify successful user registration with HTTP 201 and proper envelope."""
@@ -352,3 +354,127 @@ def test_register_weak_password_surrounding_whitespace_blocked(client):
     data = response.get_json()
     assert data["success"] is False
     assert data["error_code"] == "WEAK_PASSWORD"
+
+# ==============================================================================
+# Maximum Length Validation Tests (Name & Email Bounds, SEC-11)
+# ==============================================================================
+
+def test_register_name_exact_120_chars_accepted(client, app):
+    """Verify name with exactly 120 characters is accepted and persisted."""
+    name_120 = "N" * 120
+    payload = {
+        "name": name_120,
+        "email": "name120@example.com",
+        "password": "ValidPassword123!"
+    }
+    assert len(payload["name"]) == 120
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["data"]["name"] == name_120
+
+    with app.app_context():
+        user = User.query.filter_by(email="name120@example.com").first()
+        assert user is not None
+        assert user.name == name_120
+
+def test_register_name_121_chars_rejected_no_user_created(client, app):
+    """Verify name with 121 characters is rejected with HTTP 400 NAME_TOO_LONG and no user is created."""
+    name_121 = "N" * 121
+    payload = {
+        "name": name_121,
+        "email": "name121@example.com",
+        "password": "ValidPassword123!"
+    }
+    assert len(payload["name"]) == 121
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["success"] is False
+    assert data["error_code"] == "NAME_TOO_LONG"
+    assert "120" in data["message"]
+
+    with app.app_context():
+        user = User.query.filter_by(email="name121@example.com").first()
+        assert user is None
+
+def test_register_email_exact_255_chars_accepted(client, app):
+    """Verify email with exactly 255 characters is accepted and persisted."""
+    domain = "@example.com"  # 12 chars
+    local_part = "e" * (255 - len(domain))  # 243 chars
+    email_255 = local_part + domain
+    assert len(email_255) == 255
+
+    payload = {
+        "name": "Exact Email User",
+        "email": email_255,
+        "password": "ValidPassword123!"
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["data"]["email"] == email_255
+
+    with app.app_context():
+        user = User.query.filter_by(email=email_255).first()
+        assert user is not None
+        assert user.email == email_255
+
+def test_register_email_256_chars_rejected_no_user_created(client, app):
+    """Verify email with 256 characters is rejected with HTTP 400 EMAIL_TOO_LONG and no user is created."""
+    domain = "@example.com"  # 12 chars
+    local_part = "e" * (256 - len(domain))  # 244 chars
+    email_256 = local_part + domain
+    assert len(email_256) == 256
+
+    payload = {
+        "name": "Oversized Email User",
+        "email": email_256,
+        "password": "ValidPassword123!"
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["success"] is False
+    assert data["error_code"] == "EMAIL_TOO_LONG"
+    assert "255" in data["message"]
+
+    with app.app_context():
+        user = User.query.filter_by(name="Oversized Email User").first()
+        assert user is None
+
+def test_register_name_whitespace_stripped_before_length_validation(client, app):
+    """Verify leading/trailing whitespace on name is stripped before length check."""
+    name_120 = "S" * 120
+    spaced_name = f"   {name_120}   "
+    assert len(spaced_name) == 126
+    payload = {
+        "name": spaced_name,
+        "email": "spacedname@example.com",
+        "password": "ValidPassword123!"
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["data"]["name"] == name_120
+
+def test_register_email_whitespace_stripped_before_length_validation(client, app):
+    """Verify leading/trailing whitespace on email is stripped before length check."""
+    domain = "@example.com"
+    local_part = "s" * (255 - len(domain))
+    email_255 = local_part + domain
+    spaced_email = f"   {email_255}   "
+    assert len(spaced_email) == 261
+    payload = {
+        "name": "Spaced Email User",
+        "email": spaced_email,
+        "password": "ValidPassword123!"
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["data"]["email"] == email_255

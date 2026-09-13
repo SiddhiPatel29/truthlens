@@ -696,8 +696,8 @@ None.
 
 ### Validation Rules
 1. Request body must be a valid JSON object.
-2. `name`: Required, non-empty string.
-3. `email`: Required, valid email format (e.g. `user@domain.com`). Automatically normalized to lowercase and trimmed of leading/trailing whitespace.
+2. `name`: Required, non-empty string; maximum 120 characters (`MAX_NAME_LENGTH = 120`).
+3. `email`: Required, valid email format (e.g. `user@domain.com`); maximum 255 characters (`MAX_EMAIL_LENGTH = 255`). Automatically normalized to lowercase and trimmed of leading/trailing whitespace.
 4. `password`:
    - Length: Minimum 12 characters, maximum 128 characters.
    - Composition: No mandatory uppercase, lowercase, digits, or special characters. Passphrases, spaces, and Unicode characters are fully allowed and preserved.
@@ -729,6 +729,24 @@ None.
     "message": "Field 'name' is required.",
     "data": null,
     "error_code": "MISSING_FIELD"
+  }
+  ```
+- **Name too long (> 120 characters) (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Name must not exceed 120 characters.",
+    "data": null,
+    "error_code": "NAME_TOO_LONG"
+  }
+  ```
+- **Email too long (> 255 characters) (`400 Bad Request`)**:
+  ```json
+  {
+    "success": false,
+    "message": "Email must not exceed 255 characters.",
+    "data": null,
+    "error_code": "EMAIL_TOO_LONG"
   }
   ```
 - **Invalid email format (`400 Bad Request`)**:
@@ -871,9 +889,10 @@ None.
 2. Missing, empty, or non-Bearer headers return HTTP 401 with `AUTHENTICATION_REQUIRED`.
 3. Expired tokens return HTTP 401 with `TOKEN_EXPIRED`.
 4. Tampered, bad signature, malformed, or tokens missing required standard claims (`sub`, `iat`, `exp`) return HTTP 401 with `INVALID_TOKEN`.
-5. Authenticated user ID is extracted from `sub` and bound to `g.current_user_id`.
-6. Does not query database per request; operates statelessly.
-7. Does not expose `password_hash`, `password`, or sensitive system secrets.
+5. Queries database to verify user exists and `is_active` is True (`db.session.get(User, user_id, populate_existing=True)`).
+6. Nonexistent or inactive users are rejected with HTTP 401 with `INVALID_TOKEN` (generic message `"Invalid authentication token."` to prevent user enumeration).
+7. Authenticated user ID is extracted from `sub` and bound to `g.current_user_id` (and `g.current_user`) only after database verification succeeds.
+8. Does not expose `password_hash`, `password`, or sensitive system secrets.
 
 ### Success Response (`200 OK`)
 ```json
@@ -906,7 +925,7 @@ None.
     "error_code": "TOKEN_EXPIRED"
   }
   ```
-- **Invalid token / Tampered signature / Missing claims (`401 Unauthorized`)**:
+- **Invalid token / Tampered signature / Missing claims / Deactivated account (`401 Unauthorized`)**:
   ```json
   {
     "success": false,

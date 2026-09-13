@@ -8,7 +8,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 
 - **Command Executed**: `.venv\Scripts\python.exe -m pytest -v`
 - **Execution Date**: 2026-09-12
-- **Result Summary**: **322 passed, 0 failed, 0 skipped in 67.88s**
+- **Result Summary**: **334 passed, 0 failed, 0 skipped in 67.39s**
 
 | Test Suite | Test Case | Target / Functionality | Status | Details |
 | :--- | :--- | :--- | :---: | :--- |
@@ -107,6 +107,13 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_auth_registration.py` | `test_register_weak_password_rejected` | Local weak-password blocklist | **PASSED** | Common weak sequence rejected with `WEAK_PASSWORD` |
 | `test_auth_registration.py` | `test_register_weak_password_case_insensitive` | Case-insensitive blocklist | **PASSED** | Uppercase weak password rejected with `WEAK_PASSWORD` |
 | `test_auth_registration.py` | `test_register_weak_password_surrounding_whitespace_blocked` | Whitespace bypass prevention | **PASSED** | Padded weak password rejected with `WEAK_PASSWORD` |
+| `test_auth_registration.py` | `test_register_name_exact_120_chars_accepted` | Name 120 chars boundary | **PASSED** | Exactly 120-character name accepted with HTTP 201 |
+| `test_auth_registration.py` | `test_register_name_121_chars_rejected_too_long` | Name length rejection (121 chars) | **PASSED** | 121-character name rejected with HTTP 400 `NAME_TOO_LONG` |
+| `test_auth_registration.py` | `test_register_email_exact_255_chars_accepted` | Email 255 chars boundary | **PASSED** | Exactly 255-character email accepted with HTTP 201 |
+| `test_auth_registration.py` | `test_register_email_256_chars_rejected_too_long` | Email length rejection (256 chars) | **PASSED** | 256-character email rejected with HTTP 400 `EMAIL_TOO_LONG` |
+| `test_auth_registration.py` | `test_register_rejected_name_too_long_does_not_persist_user` | Zero DB persistence on name error | **PASSED** | Rejected 121-character name creates exactly 0 user records |
+| `test_auth_registration.py` | `test_register_rejected_email_too_long_does_not_persist_user` | Zero DB persistence on email error | **PASSED** | Rejected 256-character email creates exactly 0 user records |
+| `test_auth_registration.py` | `test_register_name_and_email_length_checked_after_strip` | Length evaluation after strip | **PASSED** | Valid 120/255 character values with whitespace padding accepted |
 | `test_auth_login.py` | `test_login_success_http_200` | Successful login HTTP status | **PASSED** | Valid credentials return HTTP 200 |
 | `test_auth_login.py` | `test_login_success_returns_access_token` | JWT access token issuance | **PASSED** | Returned standard envelope containing `access_token` |
 | `test_auth_login.py` | `test_login_token_type_is_bearer` | Token type format | **PASSED** | `token_type` is `"Bearer"` |
@@ -153,6 +160,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `test_auth_authorization.py` | `test_auth_me_does_not_expose_password` | Plaintext password privacy | **PASSED** | Plaintext password absent from `/api/auth/me` |
 | `test_auth_authorization.py` | `test_jwt_remains_signed_using_existing_configuration` | Config integration | **PASSED** | Token verifiable using configured `JWT_SECRET_KEY` |
 | `test_auth_authorization.py` | `test_unexpected_server_exception_returns_500_not_masked_as_401` | Error bubbling preservation | **PASSED** | Internal route exception returns HTTP 500 `INTERNAL_SERVER_ERROR` |
+| `test_auth_authorization.py` | `test_token_for_nonexistent_user_rejected_401` | Nonexistent user token rejection | **PASSED** | Valid JWT for deleted/nonexistent user rejected with generic 401 |
+| `test_auth_authorization.py` | `test_token_for_inactive_user_rejected_401` | Inactive user token rejection | **PASSED** | Valid JWT for `is_active=False` user rejected with generic 401 |
+| `test_auth_authorization.py` | `test_token_for_deactivated_user_rejected_after_deactivation` | Real-time token revocation | **PASSED** | Deactivating user in DB immediately revokes access for previously issued JWT |
+| `test_auth_authorization.py` | `test_token_for_deleted_user_rejected_after_deletion` | Real-time deletion revocation | **PASSED** | Deleting user in DB immediately revokes access for previously issued JWT |
+| `test_auth_authorization.py` | `test_nonexistent_and_inactive_users_return_identical_error_response` | Anti-enumeration check | **PASSED** | Identical generic 401 `INVALID_TOKEN` returned for nonexistent and inactive users |
+| `test_auth_authorization.py` | `test_active_user_context_bound_and_route_executed` | Verified context binding | **PASSED** | Valid active user executes route; `g.current_user_id` and `g.current_user` bound |
 | `test_scan_service.py` | `test_create_scan_with_valid_user_id` | Scan persistence with user | **PASSED** | Persists id, user_id, media_type, filename, PENDING status, timestamp |
 | `test_scan_service.py` | `test_create_scan_anonymous_user_none` | Temporary schema compatibility | **PASSED** | Persists scan with `user_id=None` |
 | `test_scan_service.py` | `test_create_scan_invalid_media_type_raises_validation_error` | Media type validation | **PASSED** | Empty or non-string media_type raises `ScanValidationError` |
@@ -316,6 +329,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/detect/video` | POST | Multipart (1280x720 video frame, Bearer token) | 200 | 200 | True | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (WAV duration > 120s, Bearer token) | 400 | 400 | False | **PASSED** |
 | `/api/detect/audio` | POST | Multipart (WAV duration == 120.0s, Bearer token) | 200 | 200 | True | **PASSED** |
+| `/api/auth/register` | POST | JSON (`name` 120 chars) | 201 | 201 | True | **PASSED** |
+| `/api/auth/register` | POST | JSON (`name` 121 chars) | 400 | 400 | False | **PASSED** |
+| `/api/auth/register` | POST | JSON (`email` 255 chars) | 201 | 201 | True | **PASSED** |
+| `/api/auth/register` | POST | JSON (`email` 256 chars) | 400 | 400 | False | **PASSED** |
+| `/api/auth/me` | GET | `Authorization: Bearer <nonexistent_user>` | 401 | 401 | False | **PASSED** |
+| `/api/auth/me` | GET | `Authorization: Bearer <inactive_user>` | 401 | 401 | False | **PASSED** |
 
 ---
 
@@ -341,3 +360,7 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Sentence breakdown capping (SEC-05) | Pytest & live verification | **PASSED** | Breakdown capped at 100 entries in response & DB, metrics show true total |
 | Video keyframe downscaling (SEC-06) | Pytest & live verification | **PASSED** | Keyframe preview thumbnail downscaled to <= 512px; reduces payload by >90% |
 | Audio duration bounds (SEC-07) | Pytest & live verification | **PASSED** | Audio > 120s rejected with 400 `PROCESSING_ERROR`; creates 0 scans |
+| Active-user JWT check (SEC-09) | Pytest verification | **PASSED** | `@require_auth` verifies DB user exists and is active; prevents revoked token access |
+| Anti-enumeration for tokens (SEC-09) | Pytest verification | **PASSED** | Nonexistent and deactivated accounts receive identical generic 401 response |
+| Registration length bounds (SEC-11) | Pytest verification | **PASSED** | Name > 120 and email > 255 rejected with 400 before DB persistence |
+| Zero-user persistence invariant (SEC-11) | Pytest verification | **PASSED** | Rejected registration attempts create 0 User records |

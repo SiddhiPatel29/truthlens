@@ -251,3 +251,29 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
   - Full regression test suite: **322 passed out of 322 tests in 67.88s**.
 - **Status**:
   Fixed.
+
+---
+
+## Bug 11: Missing Database Active-User Verification in JWT Authorization & Unbounded Registration Input Lengths (SEC-09, SEC-11)
+
+- **Problem**:
+  1. **SEC-09**: Protected routes guarded by `@require_auth` performed only stateless cryptographic signature and expiration verification on JWT tokens. The database `users` table was never queried. Consequently, tokens issued to accounts that were later deactivated (`is_active = False`) or deleted remained fully functional until their expiration timestamp elapsed (up to 24 hours), enabling unauthorized access to protected detection and scan history endpoints.
+  2. **SEC-11**: The user registration endpoint (`POST /api/auth/register`) validated presence and format but did not enforce maximum length constraints on `name` or `email` fields before invoking database persistence. Because the database schema defines `String(120)` for `name` and `String(255)` for `email`, an attacker could submit arbitrarily oversized strings (e.g. multi-megabyte payloads within the 50MB request limit), leading to database persistence exceptions, buffer memory bloat, and uncontrolled resource consumption.
+- **Cause**:
+  1. `@require_auth` in `backend/utils/auth.py` extracted `user_id` from the `sub` claim and bound `g.current_user_id` without verifying the database record existence or active status.
+  2. `register_user()` in `backend/services/auth_service.py` checked non-empty strings and email format regex but lacked upper character length bounds on `clean_name` and `normalized_email`.
+- **Location**:
+  - `backend/utils/auth.py` (`@require_auth`)
+  - `backend/services/auth_service.py` (`AuthService.register_user`, constants `MAX_NAME_LENGTH`, `MAX_EMAIL_LENGTH`)
+- **Fix**:
+  1. Updated `@require_auth` in `backend/utils/auth.py` to query the database using `db.session.get(User, user_id, populate_existing=True)`. If `user is None` or `not user.is_active`, the request is immediately rejected with HTTP 401 (`INVALID_TOKEN`, generic message `"Invalid authentication token."`). Context `g.current_user_id` and `g.current_user` are bound only after this check passes.
+  2. Maintained separation between stateless cryptographic verification (`AuthService.verify_token`) and authorization middleware database checks.
+  3. Added explicit constants `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255` in `backend/services/auth_service.py`. Enforced length limits on stripped/normalized values in `register_user()` before regex validation and before database operations, raising `AuthValidationError` with `NAME_TOO_LONG` or `EMAIL_TOO_LONG` (HTTP 400).
+  4. Preserved anti-enumeration: generic error messages for nonexistent and deactivated accounts. Guaranteed zero user records created on rejected registration inputs.
+- **Verification**:
+  - `tests/test_auth_authorization.py`: 6 dedicated tests verifying nonexistent user token rejection, deactivated user token rejection, deleted user token rejection, anti-enumeration, and valid active user pass-through.
+  - `tests/test_auth_registration.py`: 6 dedicated tests verifying 120-char name accepted, 121-char name rejected, 255-char email accepted, 256-char email rejected, zero DB persistence on rejection, and whitespace stripping.
+  - Focused auth test suite (`test_auth_authorization.py`, `test_auth_registration.py`, `test_auth_login.py`): 83 passed.
+  - Full regression test suite: **334 passed, 1 warning in 67.39s**.
+- **Status**:
+  Fixed.

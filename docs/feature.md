@@ -512,3 +512,33 @@ This document records the features implemented during each development phase of 
   - `tests/test_audio_persistence.py`: 22 passed.
   - Complete test suite: **322 passed out of 322 tests in 67.88s**.
 - **Current Status**: Complete.
+
+---
+
+## 24. Active-User JWT Authorization & Registration Input Length Hardening (Phase 5 Step 7A/7B)
+- **Status**: Completed (Phase 5 Step 7A/7B).
+- **Reason**: Resolve SEC-09 (JWT does not verify that the referenced user still exists and is active) and SEC-11 (missing maximum length validation for registration name and email). Ensures deactivated or deleted accounts cannot access protected forensic endpoints with previously issued unexpired tokens, and prevents database persistence errors or buffer bloat from oversized registration payloads.
+- **Files Changed / Created**:
+  - `backend/utils/auth.py` (Modified - added database user lookup and `is_active` check inside `@require_auth` via `db.session.get(User, user_id, populate_existing=True)`; returns generic HTTP 401 `INVALID_TOKEN` for nonexistent/inactive users; binds `g.current_user` alongside `g.current_user_id`)
+  - `backend/services/auth_service.py` (Modified - introduced authoritative `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255`; added pre-persistence length validation in `register_user()`; raises `AuthValidationError` with `NAME_TOO_LONG` and `EMAIL_TOO_LONG`)
+  - `tests/test_auth_authorization.py` (Modified - added 6 unit and integration tests verifying nonexistent user tokens, deactivated user tokens, deleted user tokens, and anti-enumeration behavior)
+  - `tests/test_auth_registration.py` (Modified - added 6 unit and route tests verifying 120/121-char name boundaries, 255/256-char email boundaries, zero DB persistence on rejection, and whitespace stripping)
+  - `tests/test_error_handling.py` (Modified - updated test fixture in 413 error handler test to seed valid active user for `@require_auth`)
+  - `docs/decision.md` (Updated - added Decision 29 explaining middleware vs. crypto decoupling and schema-matched length bounds)
+  - `docs/flow.md` (Updated - updated registration and authorization request flows)
+  - `docs/feature.md` (Updated - added Feature 24)
+  - `docs/bug.md` (Updated - recorded SEC-09 and SEC-11 details)
+  - `docs/test-checklist.md` (Updated - added test cases and test suite results)
+  - `docs/context.md` (Updated - recorded checkpoint, test suite status, and pending Step 7C rate limiting)
+  - `docs/api/backend-api.md` (Updated - documented `NAME_TOO_LONG` and `EMAIL_TOO_LONG` error codes)
+- **Implementation**:
+  - **Stateless/Stateful Separation**: Kept `AuthService.verify_token(token)` purely cryptographic and stateless (verifying HMAC-SHA256 signature, expiration, and mandatory `sub`, `iat`, `exp` claims) without database dependency.
+  - **Active-User Middleware Enforcement**: Implemented real-time database lookup in `@require_auth` using `db.session.get(User, user_id, populate_existing=True)`. Rejects nonexistent users (`user is None`) and deactivated users (`not user.is_active`) immediately with HTTP 401 (`INVALID_TOKEN`, generic message `"Invalid authentication token."`), preventing user enumeration while revoking access immediately upon deactivation.
+  - **Context Binding Invariant**: `g.current_user_id` and `g.current_user` are bound only after the database user is verified to exist and be active.
+  - **Schema-Matched Registration Length Limits**: Enforced `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255` on stripped/normalized inputs before regex validation and before database operations. Rejects oversized inputs with HTTP 400 (`NAME_TOO_LONG` / `EMAIL_TOO_LONG`) with zero user records created.
+- **Tests**:
+  - `tests/test_auth_authorization.py`: 12 passed.
+  - `tests/test_auth_registration.py`: 21 passed.
+  - Focused auth suite (`test_auth_authorization.py`, `test_auth_registration.py`, `test_auth_login.py`): 83 passed.
+  - Complete test suite: **334 passed out of 334 tests in 67.39s**.
+- **Current Status**: Complete.

@@ -167,15 +167,20 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
    - Defined authoritative `MAX_TEXT_LENGTH = 25_000` constant in `text_service.py` and enforced upfront in `text_routes.py`, rejecting text > 25,000 characters with HTTP 400 `TEXT_TOO_LONG` before database scan creation.
    - Analyzed complete accepted text for statistical metrics (`total_sentences`, `total_words`, `burstiness_index`, `lexical_diversity`, `ai_probability`), but capped persisted `sentence_breakdown` at `MAX_SENTENCE_BREAKDOWN_ITEMS = 100` entries to prevent database payload bloat.
    - Enforced `MAX_PREVIEW_DIMENSION = 512` thumbnail downscaling on video keyframe heatmap overlay using `cv2.INTER_AREA` before JPEG Base64 encoding, slashing payload from ~2.5MB down to ~30–60KB while keeping detection frames at original resolution.
-   - Enforced `MAX_AUDIO_DURATION_SECONDS = 120` in `AudioDetectionService.analyze_audio()`, aligning with video duration limits; audio > 120s is cleanly rejected with HTTP 400 `PROCESSING_ERROR` before persistence.
    - Guaranteed zero-scan persistence invariants across all modalities on out-of-bounds rejections.
    - Added 13 new automated tests across text, video, and audio suites.
    - Total test suite expanded to **322 passed tests in 67.88s**.
+7. **Active-User JWT Authorization & Registration Input Length Hardening (Phase 5 Step 7A/7B)**:
+    - Resolved SEC-09: Implemented real-time database user and `is_active` verification in `@require_auth` via `db.session.get(User, user_id, populate_existing=True)`. Rejects deleted or deactivated accounts immediately with generic HTTP 401 (`INVALID_TOKEN`), preventing token abuse after account suspension while preserving anti-enumeration. Context `g.current_user_id` and `g.current_user` are bound only after database verification passes. Kept `AuthService.verify_token()` purely cryptographic and stateless.
+    - Resolved SEC-11: Enforced authoritative `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255` constants in `backend/services/auth_service.py`. Enforced bounds on stripped/normalized inputs before regex validation and before database operations, raising `AuthValidationError` with `NAME_TOO_LONG` or `EMAIL_TOO_LONG` (HTTP 400). Guaranteed zero user records created on rejection.
+    - Added 12 new automated tests across `tests/test_auth_authorization.py` and `tests/test_auth_registration.py`.
+    - Total test suite expanded to **334 passed tests, 1 warning in 67.39s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 5 Step 6 (Multi-Modal Resource Bounds & Forensic Payload Hardening) is complete and verified with 322/322 tests passing and live in-process verification passed. Ready for user commit.
+- Phase 5 Step 7A (Active-User JWT Authorization, SEC-09) and Step 7B (Registration Input Length Hardening, SEC-11) are complete and verified with 334/334 tests passing.
+- **Pending Next Step**: Phase 5 Step 7C (Rate Limiting / DoS Protection, SEC-08) remains pending and will be implemented next.
 
 ---
 
@@ -186,7 +191,8 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Werkzeug `scrypt` Password Hashing**: Built-in, zero-dependency, highly secure memory-hard password hashing.
 - **Stateless JWT Tokens (`PyJWT`)**: HS256 signed access tokens with minimal claims (`sub`, `iat`, `exp`) and 24-hour expiration.
 - **Anti-Enumeration Login Security**: Generic HTTP 401 (`INVALID_CREDENTIALS`) for all authentication failures prevents account/email discovery.
-- **Stateless Authorization Decorator (`@require_auth`)**: Pure cryptographic verification without DB hits; binds integer user ID to `g.current_user_id`.
+- **Active-User Authorization Middleware (`@require_auth`, SEC-09)**: Keeps `AuthService.verify_token()` purely cryptographic and stateless, while `@require_auth` queries `db.session.get(User, user_id, populate_existing=True)` to ensure the user exists and `is_active == True`. Nonexistent and inactive accounts receive identical generic HTTP 401 (`INVALID_TOKEN`) to prevent enumeration. Binds `g.current_user_id` and `g.current_user`.
+- **Registration Input Bounds (`MAX_NAME_LENGTH`, `MAX_EMAIL_LENGTH`, SEC-11)**: Matches database schema column limits (`String(120)`, `String(255)`) before persistence; rejects oversized inputs with HTTP 400 (`NAME_TOO_LONG`, `EMAIL_TOO_LONG`) with zero database writes.
 - **Isolated Persistence Service (`ScanService`)**: Decouples database operations from pure signal processing algorithms and route controllers.
 - **Atomic Single-Transaction Commit**: `save_scan_result` persists the `ScanResult` and updates the parent `Scan` in one atomic commit, rolling back on failure.
 - **Controlled One-to-One Conflict Rejection**: Proactively raises `ScanConflictError` when attempting to attach a duplicate result to a scan.
@@ -208,8 +214,9 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 3. **Audio Format Scope (WAV-Only)**: Audio detection currently supports uncompressed WAV containers decoded via `scipy.io.wavfile.read()`. Support for compressed formats (MP3/M4A/FLAC/AAC) is deferred until a dedicated transcoding/decoding pipeline (e.g. via ffmpeg or PyAV) is introduced.
 4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
 5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
+6. **Rate Limiting Pending (SEC-08)**: Planned for Phase 5 Step 7C.
 
 ---
 
 ## 6. Recommended Next Backend Task
-
+Proceed with **Phase 5 Step 7C: Rate Limiting & DoS Protection (SEC-08)**.

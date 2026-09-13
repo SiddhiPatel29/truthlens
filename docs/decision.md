@@ -693,3 +693,39 @@ Following Phase 5 Steps 2–5, three discrete resource bound and payload bloat g
 - **Payload Safety**: Eliminates multi-megabyte `result_data` bloat across text and video scans, keeping database records under ~100KB.
 - **Persistence Invariants**: All rejections happen before `ScanService.create_scan()`, guaranteeing zero orphaned database records.
 - **Zero New Dependencies**: Accomplished entirely with existing libraries (`numpy`, `cv2`, `scipy.io.wavfile`).
+
+---
+
+## Decision 29: JWT Active-User Verification in Authorization Middleware and Registration Payload Length Bounds (SEC-09, SEC-11)
+
+### Context & Problem
+Following the comprehensive Phase 5 Step 6 security audit, two high/medium priority identity management weaknesses were identified:
+1. **SEC-09 (Stateless JWT Account Verification Gap)**: Previously, `@require_auth` decoded the signed JWT, verified claims (`sub`, `iat`, `exp`), and bound `g.current_user_id = user_id` without checking the database. If an account was deleted or deactivated (`is_active = False`) following an administrative action, compromise, or user deletion, previously issued tokens remained valid until their 24-hour expiration window elapsed, granting unauthorized access to protected forensic scan routes.
+2. **SEC-11 (Unbounded Registration Name & Email Inputs)**: `AuthService.register_user` enforced password length limits (12..128 characters) and validated email regex, but enforced no maximum length constraints on `name` or `email`. In SQLite, unconstrained strings could be accepted or trigger unhandled database exceptions on strict SQL engines (e.g. PostgreSQL/MySQL column bounds `String(120)` and `String(255)`), while creating an unconstrained payload ingestion vector.
+
+### Decisions
+1. **Decoupled Verification Architecture (Middleware vs. Token Crypto)**:
+   - `AuthService.verify_token(token)` remains strictly pure, stateless cryptographic verification. It decodes the JWT using `HS256`, enforces standard claims (`sub`, `iat`, `exp`), and validates signature and expiration without making any database queries.
+   - The `@require_auth` decorator in `backend/utils/auth.py` performs the database account verification: queries `user = db.session.get(User, user_id, populate_existing=True)`.
+   - If `user is None` (deleted or nonexistent) or `not user.is_active` (suspended or deactivated), `@require_auth` immediately terminates the request with HTTP 401 (`INVALID_TOKEN`).
+   - Context binding (`g.current_user_id = user_id`, `g.current_user = user`) occurs **only** after database verification passes.
+
+2. **Strict Anti-Enumeration Generic Error**:
+   - Rejection of nonexistent or deactivated accounts returns the generic authentication error:
+     `{"success": false, "message": "Invalid authentication token.", "data": null, "error_code": "INVALID_TOKEN"}`
+   - This exact envelope matches malformed or tampered tokens, preventing unauthenticated attackers from enumerating valid vs. deactivated account IDs.
+
+3. **Registration Input Length Bounds Matching Schema Definitions**:
+   - Defined `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255` in `backend/services/auth_service.py`, exactly matching the `User.name` (`db.String(120)`) and `User.email` (`db.String(255)`) column dimensions in `backend/database/models.py`.
+   - Validation occurs upfront in `AuthService.register_user()` on sanitized/normalized fields (`clean_name = name.strip()`, `normalized_email = raw_email.strip().lower()`) **before** running regex validation, duplicate user database queries, or persistence.
+   - If limits are exceeded, raises `AuthValidationError` returning HTTP 400 with explicit error codes `NAME_TOO_LONG` and `EMAIL_TOO_LONG`.
+   - Guarantees 0 `User` records are persisted on rejection.
+
+### Reasons & Architectural Principles
+1. **Why Active-User Verification Belongs in Middleware, Not `AuthService.verify_token()`**:
+   - Token cryptographic verification should remain stateless, fast, and purely concerned with signature and claim mathematics. Decoupling token verification from the database allows `verify_token` to be reused in contexts where database access is unnecessary or unavailable (e.g., token introspection, background helpers, or decentralized services).
+   - Authorization middleware is specifically responsible for granting request execution privileges. Querying the database inside `@require_auth` guarantees that every protected API invocation respects the real-time lifecycle state of the user account.
+
+2. **Why Registration Length Limits Match Existing Database Column Sizes**:
+   - Defensive boundary validation at the service layer prevents SQL execution failures, truncation inconsistencies, or driver-level crashes across database engines.
+   - Rejection occurs before executing `User.query.filter_by(...)`, preventing unnecessary database queries and ReDoS risks on excessively long strings.
