@@ -72,3 +72,20 @@ class Config:
     
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Rate Limiting Configuration (SEC-08)
+    RATELIMIT_ENABLED = os.getenv("RATELIMIT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+    RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
+    RATELIMIT_STRATEGY = os.getenv("RATELIMIT_STRATEGY", "fixed-window")
+    RATELIMIT_HEADERS_ENABLED = True
+
+    # Endpoint-specific rate limits (SEC-08)
+    RATELIMIT_AUTH_LOGIN = os.getenv("RATELIMIT_AUTH_LOGIN", "5 per minute; 20 per hour")
+    RATELIMIT_AUTH_REGISTER = os.getenv("RATELIMIT_AUTH_REGISTER", "3 per minute; 10 per hour")
+    RATELIMIT_REPORT_ABUSE = os.getenv("RATELIMIT_REPORT_ABUSE", "10 per minute; 60 per hour")
+    RATELIMIT_DETECT_VIDEO = os.getenv("RATELIMIT_DETECT_VIDEO", "5 per minute; 30 per hour")
+    RATELIMIT_DETECT_AUDIO = os.getenv("RATELIMIT_DETECT_AUDIO", "10 per minute; 60 per hour")
+    RATELIMIT_DETECT_IMAGE = os.getenv("RATELIMIT_DETECT_IMAGE", "15 per minute; 100 per hour")
+    RATELIMIT_DETECT_TEXT = os.getenv("RATELIMIT_DETECT_TEXT", "30 per minute; 200 per hour")
+    RATELIMIT_SCANS = os.getenv("RATELIMIT_SCANS", "60 per minute")
+    RATELIMIT_AUTH_ME = os.getenv("RATELIMIT_AUTH_ME", "60 per minute")

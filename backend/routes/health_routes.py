@@ -2,11 +2,13 @@
 System Health and Diagnostics Route.
 """
 from flask import Blueprint
+from backend.utils.limiter import limiter
 from backend.utils.response import api_response
 
 health_bp = Blueprint("health", __name__)
 
 @health_bp.route("/health", methods=["GET"])
+@limiter.exempt
 def health_check():
     """
     GET /api/health

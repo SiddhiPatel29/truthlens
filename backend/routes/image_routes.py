@@ -7,6 +7,12 @@ from backend.services.image_service import ImageDetectionService
 from backend.services.scan_service import ScanService, ScanServiceError
 from backend.utils.auth import require_auth
 from backend.utils.file_validator import validate_image_file
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_DETECT_IMAGE,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -14,6 +20,7 @@ image_bp = Blueprint("image", __name__)
 
 @image_bp.route("/detect/image", methods=["POST"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_DETECT_IMAGE", DEFAULT_LIMIT_DETECT_IMAGE), key_func=get_user_rate_limit_key)
 def detect_image():
     """
     POST /api/detect/image

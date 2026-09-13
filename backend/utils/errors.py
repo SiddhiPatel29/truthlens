@@ -48,6 +48,16 @@ def register_error_handlers(app):
             status_code=413
         )
 
+    @app.errorhandler(429)
+    def handle_rate_limit_exceeded(e):
+        return api_response(
+            success=False,
+            message="Rate limit exceeded. Please try again later.",
+            data=None,
+            error_code="RATE_LIMIT_EXCEEDED",
+            status_code=429
+        )
+
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):
         """Fallback handler for any other standard Werkzeug HTTP exceptions."""

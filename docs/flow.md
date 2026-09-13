@@ -16,6 +16,7 @@ Client HTTP Request: GET /api/health
   ▼
 [backend/routes/health_routes.py: health_check()]
   Route: @health_bp.route("/health", methods=["GET"])
+  Decorator: @limiter.exempt (Explicitly exempt from rate limiting for monitoring/load-balancers)
   Constructs static status dictionary:
     {
       "service": "VeraMedia AI Backend",
@@ -61,6 +62,18 @@ Body: { "text": "Artificial intelligence synthesis has progressed rapidly..." }
      - Queries User via db.session.get(User, user_id, populate_existing=True)
      - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
   5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
+  │
+  ▼
+[backend/utils/limiter.py: @limiter.limit (Authenticated User Keyed Rate Limiting)]
+  1. Key resolution: get_user_rate_limit_key() -> f"user:{g.current_user_id}"
+  2. Quota evaluation: checks quota against RATELIMIT_DETECT_TEXT (default: 30/min, 200/hr)
+  3. If quota exceeded:
+     - Raises RateLimitExceeded (HTTP 429)
+     - Centralized error handler in backend/utils/errors.py catches 429
+     - Flask-Limiter injects Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset headers (when RATELIMIT_HEADERS_ENABLED=True / headers_enabled=True)
+     - Returns 429 {"success": false, "message": "Rate limit exceeded. Please try again later.", "data": null, "error_code": "RATE_LIMIT_EXCEEDED"}
+     - Guarantees ZERO text analysis, ZERO Scan records, and ZERO ScanResult records created
+  4. If within quota: decrements user quota and proceeds to route handler
   │
   ▼
 [backend/routes/text_routes.py: detect_text()]
@@ -142,6 +155,15 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
      - Queries User via db.session.get(User, user_id, populate_existing=True)
      - If user is None or not user.is_active: returns 401 INVALID_TOKEN ("Invalid authentication token.")
   5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
+  │
+  ▼
+[backend/utils/limiter.py: @limiter.limit (Authenticated User Keyed Rate Limiting)]
+  1. Key resolution: get_user_rate_limit_key() -> f"user:{g.current_user_id}"
+  2. Quota evaluation: checks quota against RATELIMIT_DETECT_IMAGE (default: 15/min, 100/hr)
+  3. If quota exceeded:
+     - Raises RateLimitExceeded (HTTP 429) -> returns 429 RATE_LIMIT_EXCEEDED with Retry-After header
+     - Guarantees ZERO image reading, ZERO OpenCV analysis, and ZERO Scan/ScanResult records created
+  4. If within quota: decrements user quota and proceeds to route handler
   │
   ▼
 [backend/routes/image_routes.py: detect_image()]
@@ -237,6 +259,15 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
   5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
+[backend/utils/limiter.py: @limiter.limit (Authenticated User Keyed Rate Limiting)]
+  1. Key resolution: get_user_rate_limit_key() -> f"user:{g.current_user_id}"
+  2. Quota evaluation: checks quota against RATELIMIT_DETECT_VIDEO (default: 5/min, 30/hr)
+  3. If quota exceeded:
+     - Raises RateLimitExceeded (HTTP 429) -> returns 429 RATE_LIMIT_EXCEEDED with Retry-After header
+     - Guarantees ZERO video file saving, ZERO OpenCV frame decoding, and ZERO Scan/ScanResult records created
+  4. If within quota: decrements user quota and proceeds to route handler
+  │
+  ▼
 [backend/routes/video_routes.py: detect_video()]
   1. Checks "video" in request.files
      - If missing: returns api_response(False, "...", None, "MISSING_FILE", 400)
@@ -329,6 +360,15 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
   5. Context Binding: binds g.current_user_id = user_id and g.current_user = user
   │
   ▼
+[backend/utils/limiter.py: @limiter.limit (Authenticated User Keyed Rate Limiting)]
+  1. Key resolution: get_user_rate_limit_key() -> f"user:{g.current_user_id}"
+  2. Quota evaluation: checks quota against RATELIMIT_DETECT_AUDIO (default: 10/min, 60/hr)
+  3. If quota exceeded:
+     - Raises RateLimitExceeded (HTTP 429) -> returns 429 RATE_LIMIT_EXCEEDED with Retry-After header
+     - Guarantees ZERO audio tempfile saving, ZERO scipy decoding, and ZERO Scan/ScanResult records created
+  4. If within quota: decrements user quota and proceeds to route handler
+  │
+  ▼
 [backend/routes/audio_routes.py: detect_audio()]
   1. Checks "audio" in request.files
      - If missing: returns api_response(False, "...", None, "MISSING_FILE", 400)
@@ -412,6 +452,8 @@ Body:
   │
   ▼
 [backend/routes/abuse_routes.py: dispatch_abuse_report()]
+  Decorator: @limiter.limit(DEFAULT_LIMIT_REPORT_ABUSE) (Key: client IP request.remote_addr, 10/min, 60/hr)
+  - If IP exceeded quota: raises RateLimitExceeded (HTTP 429), returns standard RATE_LIMIT_EXCEEDED response with Retry-After header
   1. Checks request.get_json(silent=True)
      - If not dict: returns api_response(False, "Request body must be valid JSON.", None, "INVALID_JSON", 400)
   │
@@ -464,6 +506,8 @@ Body:
   │
   ▼
 [backend/routes/auth_routes.py: register()]
+  Decorator: @limiter.limit(DEFAULT_LIMIT_AUTH_REGISTER) (Key: client IP request.remote_addr, 3/min, 10/hr)
+  - If IP exceeded quota: raises RateLimitExceeded (HTTP 429), returns standard RATE_LIMIT_EXCEEDED response with Retry-After header. Zero user records created.
   1. Checks request.get_json(silent=True)
      - If body is None or not dict:
        Returns api_response(False, "Request body must be valid JSON.", None, "INVALID_JSON", 400)
@@ -533,6 +577,9 @@ Body: { "email": "  Alice.Smith@Example.COM  ", "password": "StrongPassword123" 
   │
   ▼
 [backend/routes/auth_routes.py: login()]
+  Decorator: @limiter.limit(DEFAULT_LIMIT_AUTH_LOGIN) (Key: client IP request.remote_addr, 5/min, 20/hr)
+  - If IP exceeded quota: raises RateLimitExceeded (HTTP 429), returns standard RATE_LIMIT_EXCEEDED response with Retry-After header.
+  - Critical invariant: rate limiting occurs BEFORE password verification / scrypt execution, preventing CPU exhaustion attacks.
   1. Validation: Checks request.get_json(silent=True)
      - If body is None or not dict:
        Returns api_response(False, "Request body must be valid JSON.", None, "INVALID_JSON", 400)
@@ -639,6 +686,10 @@ Headers: Authorization: Bearer <access_token>
      - Binds verified context:
          g.current_user_id = user_id
          g.current_user = user
+  │
+  ▼
+[backend/utils/limiter.py: @limiter.limit (Key: f"user:{g.current_user_id}", 60/min)]
+  - Evaluates user quota. If exceeded: returns 429 RATE_LIMIT_EXCEEDED.
   │
   ▼
 [backend/routes/auth_routes.py: get_current_user()]
@@ -805,6 +856,7 @@ Client sends invalid or unhandled request:
   - 404: handle_not_found   -> api_response(False, "Resource was not found...", None, "NOT_FOUND", 404)
   - 405: handle_method_not_allowed -> api_response(False, "Method is not allowed...", None, "METHOD_NOT_ALLOWED", 405)
   - 413: handle_payload_too_large  -> api_response(False, "Payload exceeds maximum...", None, "PAYLOAD_TOO_LARGE", 413)
+  - 429: handle_rate_limit_exceeded -> api_response(False, "Rate limit exceeded. Please try again later.", None, "RATE_LIMIT_EXCEEDED", 429) (with Retry-After and X-RateLimit-* headers emitted by Flask-Limiter when RATELIMIT_HEADERS_ENABLED=True / headers_enabled=True)
   - Exception: handle_unhandled_exception ->
       logger.exception("Unhandled server exception: %s", str(e))
       api_response(False, "An unexpected internal server error occurred.", None, "INTERNAL_SERVER_ERROR", 500)
@@ -832,6 +884,10 @@ Headers:
   2. Verifies signature, expiration, and required claims via AuthService.verify_token()
   3. Verifies user exists and user.is_active is True via db.session.get(User, user_id, populate_existing=True)
   4. Binds authenticated user context: g.current_user_id = user_id, g.current_user = user
+  │
+  ▼
+[backend/utils/limiter.py: @limiter.limit (Key: f"user:{g.current_user_id}", 60/min)]
+  - Evaluates user quota. If exceeded: returns 429 RATE_LIMIT_EXCEEDED.
   │
   ▼
 [backend/routes/scan_routes.py: list_scans()]
@@ -881,6 +937,10 @@ Headers:
   ▼
 [backend/utils/auth.py: @require_auth]
   Validates Bearer token, verifies active database user, and binds g.current_user_id
+  │
+  ▼
+[backend/utils/limiter.py: @limiter.limit (Key: f"user:{g.current_user_id}", 60/min)]
+  - Evaluates user quota. If exceeded: returns 429 RATE_LIMIT_EXCEEDED.
   │
   ▼
 [backend/routes/scan_routes.py: get_scan(scan_id)]

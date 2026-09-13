@@ -7,6 +7,12 @@ from backend.services.audio_service import AudioDetectionService
 from backend.services.scan_service import ScanService, ScanServiceError
 from backend.utils.auth import require_auth
 from backend.utils.file_validator import validate_audio_file
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_DETECT_AUDIO,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -14,6 +20,7 @@ audio_bp = Blueprint("audio", __name__)
 
 @audio_bp.route("/detect/audio", methods=["POST"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_DETECT_AUDIO", DEFAULT_LIMIT_DETECT_AUDIO), key_func=get_user_rate_limit_key)
 def detect_audio():
     """
     POST /api/detect/audio

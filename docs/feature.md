@@ -542,3 +542,63 @@ This document records the features implemented during each development phase of 
   - Focused auth suite (`test_auth_authorization.py`, `test_auth_registration.py`, `test_auth_login.py`): 83 passed.
   - Complete test suite: **334 passed out of 334 tests in 67.39s**.
 - **Current Status**: Complete.
+
+---
+
+## 25. Rate Limiting & DoS Protection (Phase 5 Step 7C)
+- **Status**: Completed (Phase 5 Step 7C).
+- **Reason**: Resolve SEC-08 (complete absence of rate limiting / request throttling on authentication, compute-intensive detection, and data-retrieval endpoints). Protects against CPU exhaustion, brute-force credential stuffing, unconstrained multipart uploads, OpenCV/scipy resource starvation, and database query flooding.
+- **Files Changed / Created**:
+  - `requirements.txt` (Modified - added pinned dependency `Flask-Limiter==4.1.1`)
+  - `backend/config.py` (Modified - added `RATELIMIT_ENABLED`, `RATELIMIT_STORAGE_URI`, `RATELIMIT_STRATEGY`, `RATELIMIT_HEADERS_ENABLED`, and per-endpoint limit configuration defaults)
+  - `.env.example` (Modified - documented rate limit environment variables and process-local memory storage vs Redis multi-worker guidance)
+  - `backend/utils/limiter.py` (Created - shared `limiter` instance, `get_user_rate_limit_key` helper, dynamic `get_limit` resolver, and `_is_rate_limiting_disabled` request filter)
+  - `backend/app.py` (Modified - initialized `limiter.init_app(app)` and added `expose_headers` to CORS for `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`)
+  - `backend/utils/errors.py` (Modified - added `@app.errorhandler(429)` emitting standardized envelope with error code `RATE_LIMIT_EXCEEDED`)
+  - `backend/routes/auth_routes.py` (Modified - decorated `/auth/login` and `/auth/register` with IP-based limits; decorated `/auth/me` with user-based limit)
+  - `backend/routes/abuse_routes.py` (Modified - decorated `/report/abuse` with IP-based limit)
+  - `backend/routes/text_routes.py` (Modified - decorated `/detect/text` with user-based limit)
+  - `backend/routes/image_routes.py` (Modified - decorated `/detect/image` with user-based limit)
+  - `backend/routes/video_routes.py` (Modified - decorated `/detect/video` with user-based limit)
+  - `backend/routes/audio_routes.py` (Modified - decorated `/detect/audio` with user-based limit)
+  - `backend/routes/scan_routes.py` (Modified - decorated `/scans` and `/scans/<id>` with user-based limit)
+  - `backend/routes/health_routes.py` (Modified - decorated `/health` with `@limiter.exempt`)
+  - `tests/conftest.py` (Modified - disabled rate limiting by default in `TestConfig` via `RATELIMIT_ENABLED = False`)
+  - `tests/test_rate_limiting.py` (Created - 21 comprehensive tests covering limits, boundary behavior, 429 envelopes, headers, scrypt avoidance, 0 scan creation, user isolation, IP isolation, independent endpoint quotas, health check exemption, and CORS)
+  - `docs/decision.md` (Updated - added Decision 30)
+  - `docs/flow.md` (Updated - updated API request flows with rate limiting steps)
+  - `docs/feature.md` (Updated - added Feature 25)
+  - `docs/bug.md` (Updated - added Bug 12 for SEC-08)
+  - `docs/test-checklist.md` (Updated - added rate limit test section and verified results)
+  - `docs/context.md` (Updated - recorded Step 7C completion and test status)
+  - `docs/api/backend-api.md` (Updated - documented HTTP 429, RATE_LIMIT_EXCEEDED, and rate limit headers)
+- **Implementation**:
+  - **Tiered Endpoint Limits**:
+    - `POST /api/auth/login`: 5/min, 20/hour (client IP)
+    - `POST /api/auth/register`: 3/min, 10/hour (client IP)
+    - `POST /api/report/abuse`: 10/min, 60/hour (client IP)
+    - `POST /api/detect/video`: 5/min, 30/hour (authenticated user ID)
+    - `POST /api/detect/audio`: 10/min, 60/hour (authenticated user ID)
+    - `POST /api/detect/image`: 15/min, 100/hour (authenticated user ID)
+    - `POST /api/detect/text`: 30/min, 200/hour (authenticated user ID)
+    - `GET /api/scans`: 60/min (authenticated user ID)
+    - `GET /api/scans/<scan_id>`: 60/min (authenticated user ID)
+    - `GET /api/auth/me`: 60/min (authenticated user ID)
+    - `GET /api/health`: Exempt from rate limiting
+  - **Keying Strategy**:
+    - Unauthenticated: Client socket IP (`request.remote_addr`) via `get_remote_address`. User-supplied `X-Forwarded-For` is ignored.
+    - Authenticated: `f"user:{g.current_user_id}"`. Guaranteed independent per-user quotas; immunity against IP hopping and proxy sharing.
+  - **Execution Ordering & Invariants**:
+    - `@require_auth` runs first. Unauthenticated requests return 401 without consuming user quota.
+    - Rate limiter executes before request file processing, OpenCV decoding, scipy audio decoding, text analysis, and `ScanService.create_scan()`.
+    - Over-limit requests create strictly 0 `Scan` and 0 `ScanResult` database records.
+    - Over-limit login requests skip `AuthService.login_user()` and avoid `scrypt` password hashing.
+  - **Standardized Error Envelope**:
+    - HTTP 429 Too Many Requests:
+      `{"success": false, "message": "Rate limit exceeded. Please try again later.", "data": null, "error_code": "RATE_LIMIT_EXCEEDED"}`
+    - When rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `headers_enabled=True`), Flask-Limiter emits `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+    - Exposed in CORS via `Access-Control-Expose-Headers`.
+- **Tests**:
+  - `tests/test_rate_limiting.py`: 21 passed.
+  - Complete regression suite: **355 passed out of 355 tests in 58.33s**.
+- **Current Status**: Complete.

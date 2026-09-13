@@ -729,3 +729,57 @@ Following the comprehensive Phase 5 Step 6 security audit, two high/medium prior
 2. **Why Registration Length Limits Match Existing Database Column Sizes**:
    - Defensive boundary validation at the service layer prevents SQL execution failures, truncation inconsistencies, or driver-level crashes across database engines.
    - Rejection occurs before executing `User.query.filter_by(...)`, preventing unnecessary database queries and ReDoS risks on excessively long strings.
+
+---
+
+## Decision 30: Rate Limiting & DoS Protection Architecture (SEC-08)
+
+### Context & Problem
+Prior to Phase 5 Step 7C, TruthLens backend had no rate limiting or request throttling infrastructure (SEC-08, HIGH severity). An attacker could exhaust server CPU, memory, and database connections by:
+1. Flooding unauthenticated routes (`/api/auth/login`, `/api/auth/register`, `/api/report/abuse`) to perform brute-force credential stuffing, account enumeration, or resource exhaustion.
+2. Flooding compute-intensive detection endpoints (`/api/detect/video`, `/api/detect/audio`, `/api/detect/image`, `/api/detect/text`) with continuous multipart uploads, triggering expensive OpenCV video frame decoding, scipy audio processing, and extensive database record insertions.
+3. Rapidly polling `/api/scans` to degrade database performance.
+
+### Decisions
+1. **Selection of Flask-Limiter (`Flask-Limiter==4.1.1`)**:
+   - Integrated `Flask-Limiter==4.1.1` as a pinned dependency in `requirements.txt`.
+   - Flask-Limiter natively integrates with the Flask application factory pattern, provides route-level decorators, handles rate limit calculation, automatically emits standardized HTTP rate limit headers, and cleanly raises `RateLimitExceeded` (HTTP 429).
+2. **Keying Strategy: Client IP vs. Authenticated User ID**:
+   - **Unauthenticated Endpoints** (`/api/auth/login`, `/api/auth/register`, `/api/report/abuse`):
+     - Keyed strictly on client IP (`flask_limiter.util.get_remote_address`).
+     - Uses socket-level `request.remote_addr` directly without trusting spoofable `X-Forwarded-For` headers (ProxyFix is deliberately not enabled unless trusted proxy configuration is explicitly provisioned).
+   - **Authenticated Endpoints** (`/api/detect/*`, `/api/scans*`, `/api/auth/me`):
+     - Keyed strictly on authenticated user ID: `f"user:{g.current_user_id}"`.
+     - Ensures User A exhausting their quota never starves User B (even when sharing a NAT, corporate firewall, or public IP).
+     - Prevents malicious users from bypassing rate limits by rotating proxy IPs.
+3. **Execution Ordering & Invariants**:
+   - Route decorator sequence on protected endpoints:
+     `@route -> @require_auth -> @limiter.limit -> view function`.
+   - Token validation and active-user database checks occur first. Unauthenticated requests fail with 401 and never consume user rate limit quotas.
+   - Rate limit check occurs before request file extraction, OpenCV video decoding, scipy audio parsing, or `ScanService.create_scan()`.
+   - Rate-limited requests create strictly 0 `Scan` and 0 `ScanResult` database records.
+   - For `/api/auth/login`, rate limiting triggers before `AuthService.login_user()`, avoiding expensive `scrypt` hashing on throttled attempts.
+4. **Per-Modality Tiered Limits**:
+   - Differentiated quotas reflect the computational cost of each media modality:
+     - `POST /api/auth/login`: 5/min, 20/hour (client IP)
+     - `POST /api/auth/register`: 3/min, 10/hour (client IP)
+     - `POST /api/report/abuse`: 10/min, 60/hour (client IP)
+     - `POST /api/detect/video`: 5/min, 30/hour (authenticated user ID)
+     - `POST /api/detect/audio`: 10/min, 60/hour (authenticated user ID)
+     - `POST /api/detect/image`: 15/min, 100/hour (authenticated user ID)
+     - `POST /api/detect/text`: 30/min, 200/hour (authenticated user ID)
+     - `GET /api/scans`: 60/min (authenticated user ID)
+     - `GET /api/scans/<scan_id>`: 60/min (authenticated user ID)
+     - `GET /api/auth/me`: 60/min (authenticated user ID)
+     - `GET /api/health`: Excluded from rate limiting (`@limiter.exempt`).
+5. **Storage Strategy & Tradeoffs**:
+   - Current implementation defaults to in-process memory storage (`memory://`).
+   - *Tradeoff*: In-process memory storage is process-local and is not globally synchronized across multiple Gunicorn worker processes. In multi-worker deployments, effective quotas are distributed per worker.
+   - *Future Migration Path*: Configured via `RATELIMIT_STORAGE_URI`. Moving to Redis requires only setting `RATELIMIT_STORAGE_URI=redis://localhost:6379/0` in `.env` without modifying any route or business logic.
+6. **Why Health Check is Exempt**:
+   - `GET /api/health` is used by load balancers, orchestrators, and uptime probes to evaluate container liveness. Rate limiting health checks could cause false-positive node evictions or routing failures.
+7. **Error Contract & CORS Headers**:
+   - Emits HTTP 429 with standard envelope:
+     `{"success": false, "message": "Rate limit exceeded. Please try again later.", "data": null, "error_code": "RATE_LIMIT_EXCEEDED"}`.
+   - When rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `headers_enabled=True`), Flask-Limiter emits `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers.
+   - CORS `Access-Control-Expose-Headers` includes all four rate limit headers for frontend consumption.

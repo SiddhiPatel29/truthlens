@@ -6,6 +6,12 @@ from flask import Blueprint, request, g
 from backend.services.text_service import TextDetectionService, MAX_TEXT_LENGTH
 from backend.services.scan_service import ScanService, ScanServiceError
 from backend.utils.auth import require_auth
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_DETECT_TEXT,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -13,6 +19,7 @@ text_bp = Blueprint("text", __name__)
 
 @text_bp.route("/detect/text", methods=["POST"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_DETECT_TEXT", DEFAULT_LIMIT_DETECT_TEXT), key_func=get_user_rate_limit_key)
 def detect_text():
     """
     POST /api/detect/text

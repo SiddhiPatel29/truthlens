@@ -6,12 +6,21 @@ import logging
 from flask import Blueprint, request, g
 from backend.services.auth_service import AuthService, AuthValidationError, AuthCredentialsError
 from backend.utils.auth import require_auth
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_AUTH_REGISTER,
+    DEFAULT_LIMIT_AUTH_LOGIN,
+    DEFAULT_LIMIT_AUTH_ME,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.route("/auth/register", methods=["POST"])
+@limiter.limit(get_limit("RATELIMIT_AUTH_REGISTER", DEFAULT_LIMIT_AUTH_REGISTER))
 def register():
     """
     POST /api/auth/register
@@ -71,6 +80,7 @@ def register():
         )
 
 @auth_bp.route("/auth/login", methods=["POST"])
+@limiter.limit(get_limit("RATELIMIT_AUTH_LOGIN", DEFAULT_LIMIT_AUTH_LOGIN))
 def login():
     """
     POST /api/auth/login
@@ -142,6 +152,7 @@ def login():
 
 @auth_bp.route("/auth/me", methods=["GET"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_AUTH_ME", DEFAULT_LIMIT_AUTH_ME), key_func=get_user_rate_limit_key)
 def get_current_user():
     """
     GET /api/auth/me

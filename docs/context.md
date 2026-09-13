@@ -175,12 +175,21 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
     - Resolved SEC-11: Enforced authoritative `MAX_NAME_LENGTH = 120` and `MAX_EMAIL_LENGTH = 255` constants in `backend/services/auth_service.py`. Enforced bounds on stripped/normalized inputs before regex validation and before database operations, raising `AuthValidationError` with `NAME_TOO_LONG` or `EMAIL_TOO_LONG` (HTTP 400). Guaranteed zero user records created on rejection.
     - Added 12 new automated tests across `tests/test_auth_authorization.py` and `tests/test_auth_registration.py`.
     - Total test suite expanded to **334 passed tests, 1 warning in 67.39s**.
+8. **Rate Limiting & DoS Protection (Phase 5 Step 7C)**:
+    - Resolved SEC-08: Integrated `Flask-Limiter==4.1.1` to provide rate limiting and request throttling across all public and protected backend endpoints.
+    - Dual keying strategy: Unauthenticated endpoints (`/api/auth/login`, `/api/auth/register`, `/api/report/abuse`) keyed by client socket IP (`request.remote_addr`) without trusting spoofable `X-Forwarded-For`; authenticated endpoints (`/api/detect/*`, `/api/scans*`, `/api/auth/me`) keyed by authenticated user ID (`f"user:{g.current_user_id}"`), guaranteeing independent user quotas and preventing IP-hopping bypasses.
+    - Execution ordering: `@require_auth` executes first (401 unauthenticated requests do not burn user rate limit quota); rate limiter executes second, before request file processing, OpenCV decoding, scipy decoding, or `ScanService.create_scan()`. Over-limit requests create strictly 0 `Scan` and 0 `ScanResult` records; over-limit login requests skip `AuthService.login_user()` and avoid `scrypt` hashing.
+    - Standardized error contract: HTTP 429 Too Many Requests with standard JSON envelope and `RATE_LIMIT_EXCEEDED` error code. When rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `headers_enabled=True`), Flask-Limiter emits `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers, exposed in CORS via `Access-Control-Expose-Headers`.
+    - Health check exemption: `GET /api/health` is exempt from rate limiting (`@limiter.exempt`).
+    - Test suite isolation: Rate limiting disabled by default in general tests (`RATELIMIT_ENABLED = False` in `TestConfig` with dynamic `request_filter` support), while dedicated test suite `tests/test_rate_limiting.py` runs with fast deterministic limits (2/second).
+    - Added 21 automated tests in `tests/test_rate_limiting.py`.
+    - Total test suite expanded to **355 passed tests, 1 warning in 58.33s**.
 
 ---
 
 ## 3. Currently Being Worked On
-- Phase 5 Step 7A (Active-User JWT Authorization, SEC-09) and Step 7B (Registration Input Length Hardening, SEC-11) are complete and verified with 334/334 tests passing.
-- **Pending Next Step**: Phase 5 Step 7C (Rate Limiting / DoS Protection, SEC-08) remains pending and will be implemented next.
+- Phase 5 Step 7C (Rate Limiting & DoS Protection, SEC-08) is complete and verified with 355/355 tests passing.
+- Working tree is clean and ready for audit / pre-commit inspection.
 
 ---
 
@@ -193,6 +202,7 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 - **Anti-Enumeration Login Security**: Generic HTTP 401 (`INVALID_CREDENTIALS`) for all authentication failures prevents account/email discovery.
 - **Active-User Authorization Middleware (`@require_auth`, SEC-09)**: Keeps `AuthService.verify_token()` purely cryptographic and stateless, while `@require_auth` queries `db.session.get(User, user_id, populate_existing=True)` to ensure the user exists and `is_active == True`. Nonexistent and inactive accounts receive identical generic HTTP 401 (`INVALID_TOKEN`) to prevent enumeration. Binds `g.current_user_id` and `g.current_user`.
 - **Registration Input Bounds (`MAX_NAME_LENGTH`, `MAX_EMAIL_LENGTH`, SEC-11)**: Matches database schema column limits (`String(120)`, `String(255)`) before persistence; rejects oversized inputs with HTTP 400 (`NAME_TOO_LONG`, `EMAIL_TOO_LONG`) with zero database writes.
+- **Rate Limiting & DoS Protection Architecture (`Flask-Limiter`, SEC-08)**: Tiered endpoint limits, IP keying for unauthenticated routes, user-ID keying for authenticated routes, `@require_auth` precedence, zero scan/result creation on 429, `scrypt` hashing avoidance on 429, HTTP 429 `RATE_LIMIT_EXCEEDED` envelope, `Retry-After` and `X-RateLimit-*` CORS exposure, and `/api/health` exemption.
 - **Isolated Persistence Service (`ScanService`)**: Decouples database operations from pure signal processing algorithms and route controllers.
 - **Atomic Single-Transaction Commit**: `save_scan_result` persists the `ScanResult` and updates the parent `Scan` in one atomic commit, rolling back on failure.
 - **Controlled One-to-One Conflict Rejection**: Proactively raises `ScanConflictError` when attempting to attach a duplicate result to a scan.
@@ -209,14 +219,14 @@ VeraMedia AI (`truthlens`) is a multi-modal deepfake detection and abuse takedow
 ---
 
 ## 5. Known Limitations & Remaining Problems
-1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service.
+1. **Unpersisted Abuse Reporting**: Abuse takedown reporting generates and formats signed dossiers, but records are not yet persisted via a database service (SEC-12).
 2. **Heuristic vs True Deep Learning**: Detection services currently utilize signal heuristics (Laplacian edge variance, Zero Crossing Rate, burstiness) rather than heavy neural network models.
 3. **Audio Format Scope (WAV-Only)**: Audio detection currently supports uncompressed WAV containers decoded via `scipy.io.wavfile.read()`. Support for compressed formats (MP3/M4A/FLAC/AAC) is deferred until a dedicated transcoding/decoding pipeline (e.g. via ffmpeg or PyAV) is introduced.
 4. **Simulated Abuse Relay**: The abuse dispatcher calculates SHA-256 fingerprints and formats compliance dossiers, but does not yet connect to external third-party takedown APIs.
 5. **Deferred Refresh Tokens & RBAC**: Tokens have a 24-hour expiration; token rotation/refresh and role-based permissions are deferred to future dedicated phases.
-6. **Rate Limiting Pending (SEC-08)**: Planned for Phase 5 Step 7C.
+6. **Process-Local Memory Limiter Storage**: Development and default deployment uses `memory://` storage. In multi-worker production deployments (e.g. Gunicorn with multiple workers), rate limit counters are not globally shared across worker processes; production deployments should set `RATELIMIT_STORAGE_URI=redis://...`.
 
 ---
 
 ## 6. Recommended Next Backend Task
-Proceed with **Phase 5 Step 7C: Rate Limiting & DoS Protection (SEC-08)**.
+Proceed with **Phase 5 Step 8: Database Concurrency & Resilience Hardening (SEC-10)** or **Abuse Endpoint Input Validation & Hardening (SEC-12)**.

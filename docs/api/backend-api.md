@@ -1189,7 +1189,61 @@ None.
 | `404 Not Found` | `NOT_FOUND` | `GET /api/unknown-endpoint` | `"The requested resource was not found on this server."` |
 | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` | `GET /api/detect/text` | `"The HTTP method is not allowed for this endpoint."` |
 | `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | File upload > 50 MB | `"Request payload exceeds maximum permitted file size."` |
+| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Request quota exceeded | `"Rate limit exceeded. Please try again later."` |
 | `500 Internal Server Error` | `INTERNAL_SERVER_ERROR` | Unhandled server exception | `"An unexpected internal server error occurred."` |
+
+---
+
+## 13. Rate Limiting & Request Throttling (SEC-08)
+
+To prevent denial-of-service (DoS) attacks, brute-force credential stuffing, and computational resource starvation, all API endpoints (with the exception of `/api/health`) enforce strict rate limits.
+
+### Rate Limit Error Envelope (`429 Too Many Requests`)
+When a client or authenticated user exceeds an endpoint's allowed quota, the server immediately rejects the request with HTTP 429:
+
+```json
+{
+  "success": false,
+  "message": "Rate limit exceeded. Please try again later.",
+  "data": null,
+  "error_code": "RATE_LIMIT_EXCEEDED"
+}
+```
+
+### Rate Limit Response Headers
+When rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `headers_enabled=True`), Flask-Limiter emits the following headers on both normal and throttled responses:
+
+| Header | Description |
+| :--- | :--- |
+| `Retry-After` | Number of seconds to wait before retrying the request. |
+| `X-RateLimit-Limit` | Maximum number of permitted requests in the current window. |
+| `X-RateLimit-Remaining` | Number of remaining requests permitted in the current window. |
+| `X-RateLimit-Reset` | UTC epoch timestamp when the current rate limit window resets. |
+
+> **CORS Notice**: These headers are explicitly included in `Access-Control-Expose-Headers` so browser clients can inspect and react to quota status programmatically.
+
+### Endpoint Quotas & Keying Strategy
+
+| Endpoint | Method | Rate Limit | Keying Strategy | Notes |
+| :--- | :---: | :--- | :--- | :--- |
+| `/api/auth/login` | `POST` | 5 / minute; 20 / hour | Client IP (`request.remote_addr`) | Rate limiting runs before password verification; throttled attempts avoid `scrypt` hashing |
+| `/api/auth/register` | `POST` | 3 / minute; 10 / hour | Client IP (`request.remote_addr`) | 429 creates 0 User records in the database |
+| `/api/report/abuse` | `POST` | 10 / minute; 60 / hour | Client IP (`request.remote_addr`) | Protects abuse dossier generation |
+| `/api/detect/video` | `POST` | 5 / minute; 30 / hour | Authenticated User ID (`f"user:{id}"`) | Runs before OpenCV decoding; 429 creates 0 Scan records |
+| `/api/detect/audio` | `POST` | 10 / minute; 60 / hour | Authenticated User ID (`f"user:{id}"`) | Runs before scipy decoding; 429 creates 0 Scan records |
+| `/api/detect/image` | `POST` | 15 / minute; 100 / hour | Authenticated User ID (`f"user:{id}"`) | Runs before image processing; 429 creates 0 Scan records |
+| `/api/detect/text` | `POST` | 30 / minute; 200 / hour | Authenticated User ID (`f"user:{id}"`) | Runs before text analysis; 429 creates 0 Scan records |
+| `/api/scans` | `GET` | 60 / minute | Authenticated User ID (`f"user:{id}"`) | Protects scan history database queries |
+| `/api/scans/<scan_id>` | `GET` | 60 / minute | Authenticated User ID (`f"user:{id}"`) | Protects forensic detail database queries |
+| `/api/auth/me` | `GET` | 60 / minute | Authenticated User ID (`f"user:{id}"`) | Protects user profile inspection |
+| `/api/health` | `GET` | **Exempt** | None | Unthrottled for container liveness and monitoring |
+
+### Security Invariants
+1. **IP Spoofing Immunity**: Unauthenticated endpoints use the direct TCP socket address (`request.remote_addr`). User-supplied `X-Forwarded-For` headers cannot bypass quotas.
+2. **IP Hopping Immunity**: Authenticated endpoints use `f"user:{g.current_user_id}"`. An authenticated user cannot bypass rate limits by switching IP addresses or rotating proxies.
+3. **User Isolation**: One user exhausting their quota never throttles another user, even when connecting from the same shared NAT or campus network.
+4. **Authentication Precedence**: `@require_auth` executes before the rate limiter. Unauthenticated or invalid token requests fail with 401 and never consume an authenticated user's quota.
+5. **Zero Resource Persistence**: Rejections occur before detection pipelines or persistence logic execute, guaranteeing zero database records are created on 429 responses.
 
 
 

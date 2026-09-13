@@ -335,6 +335,16 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | `/api/auth/register` | POST | JSON (`email` 256 chars) | 400 | 400 | False | **PASSED** |
 | `/api/auth/me` | GET | `Authorization: Bearer <nonexistent_user>` | 401 | 401 | False | **PASSED** |
 | `/api/auth/me` | GET | `Authorization: Bearer <inactive_user>` | 401 | 401 | False | **PASSED** |
+| `/api/auth/login` | POST | JSON (Over quota request) | 429 | 429 | False | **PASSED** |
+| `/api/auth/register` | POST | JSON (Over quota request) | 429 | 429 | False | **PASSED** |
+| `/api/report/abuse` | POST | JSON (Over quota request) | 429 | 429 | False | **PASSED** |
+| `/api/detect/video` | POST | Multipart (Over quota request, Bearer token) | 429 | 429 | False | **PASSED** |
+| `/api/detect/audio` | POST | Multipart (Over quota request, Bearer token) | 429 | 429 | False | **PASSED** |
+| `/api/detect/image` | POST | Multipart (Over quota request, Bearer token) | 429 | 429 | False | **PASSED** |
+| `/api/detect/text` | POST | JSON (Over quota request, Bearer token) | 429 | 429 | False | **PASSED** |
+| `/api/scans` | GET | Over quota request, Bearer token | 429 | 429 | False | **PASSED** |
+| `/api/auth/me` | GET | Over quota request, Bearer token | 429 | 429 | False | **PASSED** |
+| `/api/health` | GET | Repeated requests (10x rapid queries) | 200 | 200 | True | **PASSED** |
 
 ---
 
@@ -364,3 +374,12 @@ All test entries recorded below were **actually executed** on Windows with Pytho
 | Anti-enumeration for tokens (SEC-09) | Pytest verification | **PASSED** | Nonexistent and deactivated accounts receive identical generic 401 response |
 | Registration length bounds (SEC-11) | Pytest verification | **PASSED** | Name > 120 and email > 255 rejected with 400 before DB persistence |
 | Zero-user persistence invariant (SEC-11) | Pytest verification | **PASSED** | Rejected registration attempts create 0 User records |
+| Rate limiting on public routes (SEC-08) | Pytest verification | **PASSED** | Keyed by client IP (`request.remote_addr`); unauthenticated X-Forwarded-For ignored |
+| Rate limiting on protected routes (SEC-08) | Pytest verification | **PASSED** | Keyed by authenticated user ID (`f"user:{g.current_user_id}"`); immune to IP hopping |
+| Execution ordering (SEC-08) | Pytest verification | **PASSED** | `@require_auth` validates token before rate limiting; 401 requests do not burn user quota |
+| Avoidance of expensive work on 429 (SEC-08) | Pytest verification | **PASSED** | 429 on login avoids `scrypt` hashing; 429 on detection creates 0 Scan/ScanResult records |
+| User quota isolation (SEC-08) | Pytest verification | **PASSED** | User A exhausting quota does not throttle User B |
+| IP quota isolation (SEC-08) | Pytest verification | **PASSED** | IP A exhausting login attempts does not throttle IP B |
+| Independent endpoint quotas (SEC-08) | Pytest verification | **PASSED** | Exhausting video does not exhaust text; exhausting login does not exhaust register |
+| Health check exemption (SEC-08) | Pytest verification | **PASSED** | `/api/health` remains unthrottled and consumes zero rate-limit quota |
+| Rate limit headers & CORS (SEC-08) | Pytest verification | **PASSED** | `Retry-After`, `X-RateLimit-*` emitted by Flask-Limiter (`headers_enabled=True`) and exposed in `Access-Control-Expose-Headers` |

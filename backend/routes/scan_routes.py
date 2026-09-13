@@ -13,6 +13,12 @@ from backend.services.scan_service import (
     ALLOWED_MEDIA_TYPES,
 )
 from backend.utils.auth import require_auth
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_SCANS,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -21,6 +27,7 @@ scan_bp = Blueprint("scans", __name__)
 
 @scan_bp.route("/scans", methods=["GET"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_SCANS", DEFAULT_LIMIT_SCANS), key_func=get_user_rate_limit_key)
 def list_scans():
     """
     GET /api/scans
@@ -148,6 +155,7 @@ def list_scans():
 
 @scan_bp.route("/scans/<int:scan_id>", methods=["GET"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_SCANS", DEFAULT_LIMIT_SCANS), key_func=get_user_rate_limit_key)
 def get_scan(scan_id: int):
     """
     GET /api/scans/<int:scan_id>

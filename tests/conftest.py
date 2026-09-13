@@ -19,6 +19,7 @@ class TestConfig(Config):
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB for testing
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    RATELIMIT_ENABLED = False  # Disabled by default so existing regression suite is unaffected
 
 @pytest.fixture(scope="session")
 def app():

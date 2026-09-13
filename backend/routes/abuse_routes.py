@@ -4,12 +4,14 @@ Abuse Dispatcher API Routes.
 import logging
 from flask import Blueprint, request
 from backend.services.abuse_service import AbuseDispatcherService
+from backend.utils.limiter import limiter, get_limit, DEFAULT_LIMIT_REPORT_ABUSE
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
 abuse_bp = Blueprint("abuse", __name__)
 
 @abuse_bp.route("/report/abuse", methods=["POST"])
+@limiter.limit(get_limit("RATELIMIT_REPORT_ABUSE", DEFAULT_LIMIT_REPORT_ABUSE))
 def dispatch_abuse_report():
     """
     POST /api/report/abuse

@@ -7,6 +7,7 @@ from flask_cors import CORS
 from backend.config import Config
 from backend.database import db, migrate
 from backend.utils.errors import register_error_handlers
+from backend.utils.limiter import limiter
 from backend.routes.health_routes import health_bp
 from backend.routes.text_routes import text_bp
 from backend.routes.image_routes import image_bp
@@ -36,14 +37,23 @@ def create_app(config_class=Config):
     db.init_app(app)
     migrate.init_app(app, db)
 
-    # 3. Enable CORS for frontend communication
+    # 3. Initialize Rate Limiter (SEC-08)
+    limiter.init_app(app)
+
+    # 4. Enable CORS for frontend communication
     CORS(
         app,
         resources={r"/api/*": {"origins": app.config.get("CLIENT_ORIGIN", "*")}},
-        supports_credentials=True
+        supports_credentials=True,
+        expose_headers=[
+            "Retry-After",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+        ],
     )
 
-    # 4. Register Centralized Error Handlers
+    # 5. Register Centralized Error Handlers
     register_error_handlers(app)
 
     # 5. Register Blueprints (API Routes)

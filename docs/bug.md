@@ -277,3 +277,44 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
   - Full regression test suite: **334 passed, 1 warning in 67.39s**.
 - **Status**:
   Fixed.
+
+---
+
+## Bug 12: Absence of Rate Limiting & DoS Protection on Public and Protected Endpoints (SEC-08)
+
+- **Problem**:
+  The TruthLens backend had no rate limiting or request throttling mechanism on any endpoint. Both public unauthenticated endpoints (`POST /api/auth/login`, `POST /api/auth/register`, `POST /api/report/abuse`) and authenticated compute-heavy endpoints (`POST /api/detect/video`, `POST /api/detect/audio`, `POST /api/detect/image`, `POST /api/detect/text`, `GET /api/scans*`, `GET /api/auth/me`) were completely unbounded.
+- **Cause**:
+  Flask application lacked request throttling middleware or extension integration. No request counting, keying, or quota tracking was performed before executing expensive CPU hashing (`scrypt`), video frame decoding (`OpenCV`), audio waveform processing (`scipy`), or relational database insertions.
+- **Attack Scenario**:
+  1. An attacker could flood `POST /api/auth/login` with thousands of invalid requests, forcing the server to execute expensive `scrypt` password hashing for every request and exhausting CPU cores.
+  2. A malicious registered user could flood `POST /api/detect/video` with concurrent multipart video uploads, exhausting server memory and disk I/O with OpenCV frame decoding and creating thousands of orphaned `Scan` database rows.
+  3. An attacker could flood `POST /api/auth/register` to fill the database with dummy user records or flood `POST /api/report/abuse` to exhaust disk/network dispatch channels.
+- **Location**:
+  - `requirements.txt`
+  - `backend/app.py`
+  - `backend/config.py`
+  - `backend/utils/limiter.py`
+  - `backend/utils/errors.py`
+  - All route blueprints (`auth_routes.py`, `abuse_routes.py`, `text_routes.py`, `image_routes.py`, `video_routes.py`, `audio_routes.py`, `scan_routes.py`, `health_routes.py`)
+- **Fix**:
+  1. Pinned `Flask-Limiter==4.1.1` in `requirements.txt`.
+  2. Configured in-process memory storage (`memory://`) configurable via `RATELIMIT_STORAGE_URI` for future Redis migration without modifying route code.
+  3. Implemented tiered endpoint limits:
+     - Login: 5/min, 20/hour (client IP)
+     - Register: 3/min, 10/hour (client IP)
+     - Abuse Report: 10/min, 60/hour (client IP)
+     - Video Detection: 5/min, 30/hour (user ID)
+     - Audio Detection: 10/min, 60/hour (user ID)
+     - Image Detection: 15/min, 100/hour (user ID)
+     - Text Detection: 30/min, 200/hour (user ID)
+     - Scan History & Detail: 60/min (user ID)
+     - Auth Me: 60/min (user ID)
+     - Health Check: Exempt (`@limiter.exempt`)
+  4. Enforced strict execution ordering: `@require_auth` verifies token and active database user before rate limiting is evaluated. Rate limiting executes before file extraction, decoding, or `ScanService.create_scan()`.
+  5. Implemented standard HTTP 429 response envelope with `RATE_LIMIT_EXCEEDED` error code; when rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `headers_enabled=True`), Flask-Limiter emits `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers (exposed via CORS).
+- **Verification**:
+  - `tests/test_rate_limiting.py`: 21 comprehensive tests verifying limits, boundaries, 429 envelopes, headers, scrypt avoidance, 0 scans/results created, user isolation, IP isolation, independent endpoint quotas, and CORS.
+  - Complete regression suite: **355 passed out of 355 tests in 58.33s**.
+- **Status**:
+  Fixed.

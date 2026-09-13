@@ -7,6 +7,12 @@ from backend.services.video_service import VideoDetectionService
 from backend.services.scan_service import ScanService, ScanServiceError
 from backend.utils.auth import require_auth
 from backend.utils.file_validator import validate_video_file
+from backend.utils.limiter import (
+    limiter,
+    get_user_rate_limit_key,
+    get_limit,
+    DEFAULT_LIMIT_DETECT_VIDEO,
+)
 from backend.utils.response import api_response
 
 logger = logging.getLogger(__name__)
@@ -14,6 +20,7 @@ video_bp = Blueprint("video", __name__)
 
 @video_bp.route("/detect/video", methods=["POST"])
 @require_auth
+@limiter.limit(get_limit("RATELIMIT_DETECT_VIDEO", DEFAULT_LIMIT_DETECT_VIDEO), key_func=get_user_rate_limit_key)
 def detect_video():
     """
     POST /api/detect/video
