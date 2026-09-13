@@ -81,6 +81,8 @@ def test_detect_audio_success(client, real_audio_path, auth_headers):
     assert json_data["error_code"] is None
     
     payload = json_data["data"]
+    assert "scan_id" in payload
+    assert isinstance(payload["scan_id"], int) and payload["scan_id"] > 0
     assert "is_synthetic_audio" in payload
     assert isinstance(payload["is_synthetic_audio"], bool)
     assert "confidence_score" in payload

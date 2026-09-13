@@ -602,3 +602,23 @@ This document records the features implemented during each development phase of 
   - `tests/test_rate_limiting.py`: 21 passed.
   - Complete regression suite: **355 passed out of 355 tests in 58.33s**.
 - **Current Status**: Complete.
+
+---
+
+### Feature 26: Abuse Report Database Persistence
+- **Reason**: Ensure submitted abuse reports dispatched to platform safety channels are reliably stored in the `abuse_reports` table for administrative auditing, status tracking, and forensic compliance.
+- **Files Changed**:
+  - `backend/services/abuse_service.py` (Modified - added `AbuseDatabaseError` and `AbuseDispatcherService.save_report()` with atomic transaction rollback)
+  - `backend/routes/abuse_routes.py` (Modified - persisted validated dossiers to `AbuseReport` table with optional scan/user links)
+  - `tests/test_abuse_report.py` (Modified - added comprehensive persistence, validation failure, DB error rollback, and cryptographic integrity tests)
+  - `docs/api/backend-api.md` (Updated - specified persistence behavior for `/api/report/abuse`)
+  - `docs/flow.md` (Updated - added persistence step to execution flow)
+  - `docs/feature.md` (Updated - added Feature 26)
+  - `docs/bug.md` (Updated - recorded resolution of abuse report non-persistence gap)
+- **Implementation**:
+  - Validates payload structure and generates cryptographically signed dossier with SHA-256 fingerprint.
+  - Persists an `AbuseReport` record in `DISPATCHED` status containing `platform`, `status`, full JSON `report_data`, and optional `user_id`/`scan_id`.
+  - Atomically rolls back transactions upon database errors, raising `AbuseDatabaseError` and returning sanitized HTTP 500 without leaking database internals or leaving partial rows.
+- **Tests**:
+  - `tests/test_abuse_report.py`: 7 passed.
+- **Current Status**: Complete.

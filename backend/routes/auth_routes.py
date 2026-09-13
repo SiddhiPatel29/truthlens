@@ -164,7 +164,9 @@ def get_current_user():
         "success": true,
         "message": "Authenticated user.",
         "data": {
-            "user_id": 1
+            "user_id": 1,
+            "name": "Jane Doe",
+            "email": "jane@example.com"
         },
         "error_code": null
     }
@@ -172,11 +174,14 @@ def get_current_user():
     Error Responses:
     - 401 Unauthorized: Missing, expired, or invalid Bearer token.
     """
+    user = getattr(g, "current_user", None)
     return api_response(
         success=True,
         message="Authenticated user.",
         data={
-            "user_id": g.current_user_id
+            "user_id": g.current_user_id,
+            "name": user.name if user else None,
+            "email": user.email if user else None,
         },
         status_code=200
     )

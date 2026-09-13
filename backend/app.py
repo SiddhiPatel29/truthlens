@@ -41,9 +41,17 @@ def create_app(config_class=Config):
     limiter.init_app(app)
 
     # 4. Enable CORS for frontend communication
+    client_origin_config = app.config.get("CLIENT_ORIGIN")
+    if isinstance(client_origin_config, str):
+        origins = [o.strip() for o in client_origin_config.split(",") if o.strip()]
+    elif isinstance(client_origin_config, (list, tuple, set)):
+        origins = [str(o).strip() for o in client_origin_config if str(o).strip()]
+    else:
+        origins = ["http://localhost:3000", "http://localhost:5173"]
+
     CORS(
         app,
-        resources={r"/api/*": {"origins": app.config.get("CLIENT_ORIGIN", "*")}},
+        resources={r"/api/*": {"origins": origins}},
         supports_credentials=True,
         expose_headers=[
             "Retry-After",

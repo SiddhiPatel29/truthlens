@@ -122,6 +122,9 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
     assert json_data["error_code"] is None
 
     data = json_data["data"]
+    assert "scan_id" in data
+    assert isinstance(data["scan_id"], int)
+    assert data["scan_id"] > 0
     assert "is_ai_generated" in data
     assert "ai_confidence_score" in data
     assert "metrics" in data
@@ -133,6 +136,7 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
         assert len(scans) == 1
         scan = scans[0]
 
+        assert data["scan_id"] == scan.id
         assert scan.user_id == auth_user_a["id"]
         assert scan.media_type == "text"
         assert scan.filename is None
@@ -158,7 +162,8 @@ def test_valid_authenticated_text_request_persists_scan_and_result(client, app, 
         assert scan_result.risk_level == expected_risk
 
         # Verify result_data content
-        assert scan_result.result_data == data
+        expected_result_data = {k: v for k, v in data.items() if k != "scan_id"}
+        assert scan_result.result_data == expected_result_data
         assert scan_result.created_at is not None
 
 

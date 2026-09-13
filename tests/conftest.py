@@ -15,7 +15,7 @@ class TestConfig(Config):
     SECRET_KEY = "test-secret-key-for-unit-tests"
     JWT_SECRET_KEY = "test-jwt-secret-key-for-unit-tests"
     JWT_EXPIRATION_HOURS = 24
-    CLIENT_ORIGIN = "http://localhost:3000"
+    CLIENT_ORIGIN = "http://localhost:3000,http://localhost:5173"
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB for testing
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False

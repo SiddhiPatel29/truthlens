@@ -108,9 +108,14 @@ def detect_image():
             status_code=500
         )
 
+    response_data = {
+        "scan_id": scan.id,
+        **result
+    }
+
     return api_response(
         success=True,
         message="Image analyzed successfully.",
-        data=result,
+        data=response_data,
         status_code=200
     )

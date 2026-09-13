@@ -22,7 +22,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 from backend.app import create_app
 from backend.database.db import db as _db
-from backend.database.models import User, Scan, ScanResult
+from backend.database.models import User, Scan, ScanResult, AbuseReport
 from backend.services.auth_service import AuthService
 from backend.utils.limiter import (
     limiter,
@@ -71,6 +71,7 @@ def rl_app():
         yield app
         limiter.reset()
         _db.session.rollback()
+        _db.session.query(AbuseReport).delete()
         _db.session.query(ScanResult).delete()
         _db.session.query(Scan).delete()
         _db.session.query(User).delete()

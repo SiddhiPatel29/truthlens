@@ -80,6 +80,25 @@ def test_correct_user_id_extracted_from_sub(client, valid_token, auth_user):
     assert "user_id" in body["data"]
     assert body["data"]["user_id"] == auth_user["id"]
 
+def test_authenticated_me_returns_profile_information(client, valid_token, auth_user):
+    """2b. Authenticated request returns user_id, name, email and does not expose password_hash."""
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {valid_token}"}
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["success"] is True
+    assert body["message"] == "Authenticated user."
+    assert body["error_code"] is None
+    data = body["data"]
+    assert data["user_id"] == auth_user["id"]
+    assert data["name"] == auth_user["name"]
+    assert data["email"] == auth_user["email"]
+    assert "password_hash" not in data
+    assert "password" not in data
+    assert set(data.keys()) == {"user_id", "name", "email"}
+
 def test_g_current_user_id_available_to_route(valid_token, auth_user):
     """3. g.current_user_id and g.current_user are available to the decorated route."""
     from backend.app import create_app

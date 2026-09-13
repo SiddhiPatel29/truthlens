@@ -54,8 +54,9 @@ class Config:
     except ValueError:
         JWT_EXPIRATION_HOURS = 24
 
-    # Allowed origin for CORS (Frontend communication)
-    CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "http://localhost:3000")
+    # Allowed origins for CORS (Frontend communication)
+    # Supports comma-separated list of origins. Defaults to local React (3000) and Vite (5173).
+    CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "http://localhost:3000,http://localhost:5173")
 
     # Maximum upload payload size in bytes (defaults to 50 MB)
     try:

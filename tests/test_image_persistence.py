@@ -155,6 +155,9 @@ def test_valid_authenticated_image_request_persists_scan_and_result(
     assert json_data["error_code"] is None
 
     payload = json_data["data"]
+    assert "scan_id" in payload
+    assert isinstance(payload["scan_id"], int)
+    assert payload["scan_id"] > 0
     assert "is_deepfake" in payload
     assert "confidence_score" in payload
     assert "manipulation_type" in payload
@@ -167,6 +170,7 @@ def test_valid_authenticated_image_request_persists_scan_and_result(
         assert len(scans) == 1
         scan = scans[0]
 
+        assert payload["scan_id"] == scan.id
         assert scan.user_id == auth_user_a["id"]
         assert scan.media_type == "image"
         assert scan.filename == "test.jpg"
@@ -190,7 +194,8 @@ def test_valid_authenticated_image_request_persists_scan_and_result(
         assert scan_result.risk_level == expected_risk
 
         # Verify result_data content matches detector output
-        assert scan_result.result_data == payload
+        expected_result_data = {k: v for k, v in payload.items() if k != "scan_id"}
+        assert scan_result.result_data == expected_result_data
         # Ensure no raw binary image bytes are stored in result_data
         assert "image_bytes" not in scan_result.result_data
         assert scan_result.created_at is not None

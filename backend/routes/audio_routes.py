@@ -135,9 +135,14 @@ def detect_audio():
             status_code=500
         )
 
+    response_data = {
+        "scan_id": scan.id,
+        **result
+    }
+
     return api_response(
         success=True,
         message="Audio analyzed successfully.",
-        data=result,
+        data=response_data,
         status_code=200
     )

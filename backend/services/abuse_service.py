@@ -4,12 +4,69 @@ Constructs cryptographically hashed takedown dossiers for target platforms (excl
 """
 import hashlib
 import json
+import logging
 import time
 import uuid
+from sqlalchemy.exc import SQLAlchemyError
+from backend.database.db import db
+from backend.database.models import AbuseReport
+
+logger = logging.getLogger(__name__)
+
+class AbuseServiceError(Exception):
+    """Base exception for abuse service errors."""
+    pass
+
+class AbuseDatabaseError(AbuseServiceError):
+    """Exception raised when database persistence fails."""
+    pass
 
 class AbuseDispatcherService:
     # TikTok removed from supported platforms list
     SUPPORTED_PLATFORMS = {"youtube", "x", "meta", "custom"}
+
+    @classmethod
+    def save_report(
+        cls,
+        platform: str,
+        dossier: dict,
+        user_id: int = None,
+        scan_id: int = None
+    ) -> AbuseReport:
+        """
+        Persists a generated abuse dossier to the database in an atomic transaction.
+
+        Args:
+            platform (str): Target platform name (e.g. "youtube", "meta", "x", "custom").
+            dossier (dict): The complete generated evidence dossier dictionary.
+            user_id (int, optional): Authenticated user ID if available, otherwise None.
+            scan_id (int, optional): Associated scan ID if available, otherwise None.
+
+        Returns:
+            AbuseReport: The persisted database model instance.
+
+        Raises:
+            AbuseDatabaseError: If database persistence fails.
+        """
+        try:
+            report = AbuseReport(
+                user_id=user_id,
+                scan_id=scan_id,
+                platform=platform.lower().strip(),
+                status=dossier.get("status", "DISPATCHED"),
+                report_data=dossier
+            )
+            db.session.add(report)
+            db.session.commit()
+            return report
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logger.exception("Failed to persist abuse report to database: %s", str(e))
+            raise AbuseDatabaseError("Failed to persist abuse report to database.") from e
+        except Exception as e:
+            db.session.rollback()
+            logger.exception("Unexpected error while persisting abuse report: %s", str(e))
+            raise AbuseDatabaseError("Failed to persist abuse report to database.") from e
 
     @classmethod
     def generate_dossier(cls, payload: dict) -> dict:

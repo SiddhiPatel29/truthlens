@@ -91,6 +91,7 @@ None.
   "success": true,
   "message": "Text analyzed successfully.",
   "data": {
+    "scan_id": 1,
     "is_ai_generated": false,
     "ai_confidence_score": 0.32,
     "metrics": {
@@ -207,6 +208,7 @@ None.
   "success": true,
   "message": "Image analyzed successfully.",
   "data": {
+    "scan_id": 1,
     "is_deepfake": false,
     "confidence_score": 0.446,
     "manipulation_type": "Authentic Pixel Distribution",
@@ -327,6 +329,7 @@ None.
   "success": true,
   "message": "Video analyzed successfully.",
   "data": {
+    "scan_id": 1,
     "is_deepfake": false,
     "confidence_score": 0.412,
     "metrics": {
@@ -476,6 +479,7 @@ None.
   "success": true,
   "message": "Audio analyzed successfully.",
   "data": {
+    "scan_id": 1,
     "is_synthetic_audio": false,
     "confidence_score": 0.354,
     "metrics": {
@@ -597,7 +601,8 @@ None.
 - **Method**: `POST`
 - **Path**: `/api/report/abuse`
 - **Authentication**: None (Public in Phase 1)
-- **Service Called**: `AbuseDispatcherService.generate_dossier`
+- **Services Called**: `AbuseDispatcherService.generate_dossier`, `AbuseDispatcherService.save_report`
+- **Persistence**: Atomically persists an `AbuseReport` database record containing `platform`, `status` (`DISPATCHED`), `report_data` (complete generated dossier), and optional `user_id`/`scan_id` relationships upon successful validation.
 - **Request Headers**: `Content-Type: application/json`
 - **Request Body**:
 ```json
@@ -900,7 +905,9 @@ None.
   "success": true,
   "message": "Authenticated user.",
   "data": {
-    "user_id": 1
+    "user_id": 1,
+    "name": "Jane Doe",
+    "email": "jane@example.com"
   },
   "error_code": null
 }
@@ -1220,7 +1227,7 @@ When rate-limit header support is enabled (`RATELIMIT_HEADERS_ENABLED=True` / `h
 | `X-RateLimit-Remaining` | Number of remaining requests permitted in the current window. |
 | `X-RateLimit-Reset` | UTC epoch timestamp when the current rate limit window resets. |
 
-> **CORS Notice**: These headers are explicitly included in `Access-Control-Expose-Headers` so browser clients can inspect and react to quota status programmatically.
+> **CORS Notice**: These headers are explicitly included in `Access-Control-Expose-Headers` so browser clients can inspect and react to quota status programmatically. Allowed client origins are configured via `CLIENT_ORIGIN` (supporting comma-separated origins, defaulting in development to `http://localhost:3000,http://localhost:5173`). Wildcard `*` origins are rejected for security.
 
 ### Endpoint Quotas & Keying Strategy
 

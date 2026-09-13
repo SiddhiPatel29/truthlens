@@ -63,6 +63,8 @@ def test_detect_text_success(client, sample_text, auth_headers):
     assert json_data["error_code"] is None
     
     data = json_data["data"]
+    assert "scan_id" in data
+    assert isinstance(data["scan_id"], int) and data["scan_id"] > 0
     assert "is_ai_generated" in data
     assert isinstance(data["is_ai_generated"], bool)
     assert "ai_confidence_score" in data

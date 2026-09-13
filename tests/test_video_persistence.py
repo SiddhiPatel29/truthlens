@@ -136,6 +136,9 @@ def test_valid_authenticated_video_request_persists_scan_and_result(
     assert json_data["error_code"] is None
 
     payload = json_data["data"]
+    assert "scan_id" in payload
+    assert isinstance(payload["scan_id"], int)
+    assert payload["scan_id"] > 0
     assert "is_deepfake" in payload
     assert "confidence_score" in payload
     assert "metrics" in payload
@@ -147,6 +150,7 @@ def test_valid_authenticated_video_request_persists_scan_and_result(
         assert len(scans) == 1
         scan = scans[0]
 
+        assert payload["scan_id"] == scan.id
         assert scan.user_id == auth_user_a["id"]
         assert scan.media_type == "video"
         assert scan.filename == "test.mp4"

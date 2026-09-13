@@ -80,6 +80,8 @@ def test_detect_video_success(client, real_video_path, auth_headers):
     assert json_data["error_code"] is None
     
     payload = json_data["data"]
+    assert "scan_id" in payload
+    assert isinstance(payload["scan_id"], int) and payload["scan_id"] > 0
     assert "is_deepfake" in payload
     assert isinstance(payload["is_deepfake"], bool)
     assert "confidence_score" in payload

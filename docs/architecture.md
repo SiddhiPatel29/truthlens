@@ -81,10 +81,10 @@ truthlens/
   2. Applies configuration values from `backend/config.py`.
   3. Configures server-side Python structured logging via `configure_logging()`.
   4. Initializes the database layer (`db.init_app(app)`) and migration engine (`migrate.init_app(app, db)`).
-  5. Binds Cross-Origin Resource Sharing (`CORS`) with `supports_credentials=True` restricted to `CLIENT_ORIGIN`.
+  5. Binds Cross-Origin Resource Sharing (`CORS`) with `supports_credentials=True` restricted to `CLIENT_ORIGIN` (supports comma-separated origins, defaulting to `http://localhost:3000,http://localhost:5173` for Next.js/React and Vite).
   6. Registers centralized error handlers (`register_error_handlers(app)`).
   7. Mounts modular route Blueprints (`health_bp`, `text_bp`, `image_bp`, `video_bp`, `audio_bp`, `abuse_bp`, `auth_bp`, `scan_bp`) under the common URL prefix `/api`.
-  8. When executed directly (`python -m backend.app`), starts the WSGI development server on the configured port.
+  8. When executed directly (`python run.py` or `python -m backend.app`), starts the WSGI development server on the configured port.
 
 ---
 

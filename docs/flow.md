@@ -122,7 +122,7 @@ Body: { "text": "Artificial intelligence synthesis has progressed rapidly..." }
   │
   ▼
 [backend/utils/response.py: api_response()]
-  Returns jsonify({ "success": True, "message": "Text analyzed successfully.", "data": result, "error_code": None }), 200
+  Returns jsonify({ "success": True, "message": "Text analyzed successfully.", "data": { "scan_id": scan.id, ...result }, "error_code": None }), 200
   │
   ▼
 Client receives HTTP 200 JSON Response
@@ -224,7 +224,7 @@ Body: file field 'image' containing image binary (e.g. test.jpg)
   │
   ▼
 [backend/utils/response.py: api_response()]
-  Returns jsonify({ "success": True, "message": "Image analyzed successfully.", "data": result, "error_code": None }), 200
+  Returns jsonify({ "success": True, "message": "Image analyzed successfully.", "data": { "scan_id": scan.id, ...result }, "error_code": None }), 200
   │
   ▼
 Client receives HTTP 200 JSON Response
@@ -325,7 +325,7 @@ Body: file field 'video' containing video binary (e.g. test.mp4)
   │
   ▼
 [backend/utils/response.py: api_response()]
-  Returns jsonify({ "success": True, "message": "Video analyzed successfully.", "data": result, "error_code": None }), 200
+  Returns jsonify({ "success": True, "message": "Video analyzed successfully.", "data": { "scan_id": scan.id, ...result }, "error_code": None }), 200
   │
   ▼
 Client receives HTTP 200 JSON Response
@@ -424,7 +424,7 @@ Body: file field 'audio' containing audio binary (e.g. test.wav)
   │
   ▼
 [backend/utils/response.py: api_response()]
-  Returns jsonify({ "success": True, "message": "Audio analyzed successfully.", "data": result, "error_code": None }), 200
+  Returns jsonify({ "success": True, "message": "Audio analyzed successfully.", "data": { "scan_id": scan.id, ...result }, "error_code": None }), 200
   │
   ▼
 Client receives HTTP 200 JSON Response
@@ -475,9 +475,16 @@ Body:
   7. Formats dossier dictionary with forensic evidence, standards compliance (C2PA, NIST), and receipt acknowledgment code
   │
   ▼
+[backend/services/abuse_service.py: AbuseDispatcherService.save_report()]
+  1. Resolves optional user_id from g.current_user_id and scan_id from payload (null if absent)
+  2. Instantiates AbuseReport(platform=platform, status="DISPATCHED", report_data=dossier, user_id=user_id, scan_id=scan_id)
+  3. Executes db.session.add(report) and db.session.commit() within an atomic transaction
+  4. On failure: rolls back session via db.session.rollback() and raises AbuseDatabaseError
+  │
+  ▼
 [backend/routes/abuse_routes.py: dispatch_abuse_report()]
-  Catches ValueError -> returns api_response(False, str(e), None, "VALIDATION_ERROR", 400)
-  Catches Exception  -> logs traceback via logger.exception(), returns sanitized 500 error
+  Catches ValueError                    -> returns api_response(False, str(e), None, "VALIDATION_ERROR", 400)
+  Catches (AbuseDatabaseError, Exception)-> logs traceback via logger.exception(), returns sanitized 500 error
   On success:
   │
   ▼
@@ -694,8 +701,8 @@ Headers: Authorization: Bearer <access_token>
   ▼
 [backend/routes/auth_routes.py: get_current_user()]
   - Invokes protected route function
-  - Accesses g.current_user_id
-  - Wraps response via api_response(True, "Authenticated user.", {"user_id": g.current_user_id}, None, 200)
+  - Accesses g.current_user_id, g.current_user.name, g.current_user.email
+  - Wraps response via api_response(True, "Authenticated user.", {"user_id": g.current_user_id, "name": user.name, "email": user.email}, None, 200)
   │
   ▼
 [backend/utils/response.py: api_response()]
@@ -703,13 +710,15 @@ Headers: Authorization: Bearer <access_token>
     "success": True,
     "message": "Authenticated user.",
     "data": {
-      "user_id": 1
+      "user_id": 1,
+      "name": "Jane Doe",
+      "email": "jane@example.com"
     },
     "error_code": None
   }), 200
   │
   ▼
-Client receives HTTP 200 OK with authenticated user_id
+Client receives HTTP 200 OK with authenticated user profile (user_id, name, email)
 ```
 
 ---

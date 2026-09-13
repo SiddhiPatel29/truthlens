@@ -2,8 +2,10 @@
 Abuse Dispatcher API Routes.
 """
 import logging
-from flask import Blueprint, request
-from backend.services.abuse_service import AbuseDispatcherService
+from flask import Blueprint, g, request
+from backend.database.db import db
+from backend.database.models import User, Scan
+from backend.services.abuse_service import AbuseDispatcherService, AbuseDatabaseError
 from backend.utils.limiter import limiter, get_limit, DEFAULT_LIMIT_REPORT_ABUSE
 from backend.utils.response import api_response
 
@@ -35,6 +37,28 @@ def dispatch_abuse_report():
 
     try:
         dossier = AbuseDispatcherService.generate_dossier(body)
+        platform = body.get("platform", "").lower().strip()
+
+        # Resolve optional relationships if validly present in context or payload
+        user_id = None
+        current_uid = getattr(g, "current_user_id", None)
+        if isinstance(current_uid, int) and current_uid > 0:
+            if db.session.get(User, current_uid):
+                user_id = current_uid
+
+        scan_id = None
+        raw_scan_id = body.get("scan_id")
+        if isinstance(raw_scan_id, int) and raw_scan_id > 0:
+            if db.session.get(Scan, raw_scan_id):
+                scan_id = raw_scan_id
+
+        AbuseDispatcherService.save_report(
+            platform=platform,
+            dossier=dossier,
+            user_id=user_id,
+            scan_id=scan_id
+        )
+
         return api_response(
             success=True,
             message="Abuse dossier successfully generated and dispatched.",
@@ -49,8 +73,8 @@ def dispatch_abuse_report():
             error_code="VALIDATION_ERROR",
             status_code=400
         )
-    except Exception as e:
-        logger.exception("Unexpected error in abuse report generation: %s", str(e))
+    except (AbuseDatabaseError, Exception) as e:
+        logger.exception("Unexpected error in abuse report processing: %s", str(e))
         return api_response(
             success=False,
             message="An unexpected error occurred while processing the abuse report.",

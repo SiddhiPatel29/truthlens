@@ -318,3 +318,21 @@ This document records the actual bugs discovered and fixed during Phase 1 develo
   - Complete regression suite: **355 passed out of 355 tests in 58.33s**.
 - **Status**:
   Fixed.
+
+---
+
+### 13. Abuse Report Generation Non-Persistence
+- **Symptoms**:
+  While `POST /api/report/abuse` generated valid takedown dossiers, the reports were never committed to the database. `AbuseReport.query.count()` remained 0, preventing administrative audit and forensic history tracking.
+- **Root Cause**:
+  `backend/routes/abuse_routes.py` invoked `AbuseDispatcherService.generate_dossier(body)` and returned the dictionary directly without calling the database session or persisting an `AbuseReport` model record.
+- **Fix**:
+  1. Created `AbuseDispatcherService.save_report()` wrapping database persistence in an atomic transaction with `db.session.rollback()` error handling.
+  2. Defined `AbuseDatabaseError` to encapsulate persistence failures.
+  3. Updated `dispatch_abuse_report` route handler to persist the dossier to `AbuseReport` table with optional `user_id` and `scan_id` foreign keys.
+  4. Preserved existing response envelope, status code (201), and cryptographic SHA-256 fingerprinting.
+  5. Handled persistence errors gracefully with sanitized HTTP 500 error envelope and zero partial records.
+- **Verification**:
+  - `tests/test_abuse_report.py`: 7 focused tests verifying persistence, data correspondence, validation failure zero-persistence, database error rollback, and cryptographic integrity.
+- **Status**:
+  Fixed.
