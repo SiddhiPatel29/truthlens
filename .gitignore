@@ -24,3 +24,12 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 scratch/
+
+# Node / Frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.local
+.npm
+package-lock.json.bak
