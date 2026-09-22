@@ -304,7 +304,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onStartAnalysis }) => {
       </button>
 
       <div style={{ textAlign: 'center', marginTop: '0.75rem', fontSize: '0.725rem', color: 'var(--text-muted)' }}>
-        By submitting media, verification runs under C2PA-Authenticity and NIST-AI-100-2 forensic standards.
+        Submitted media is analyzed securely using statistical and forensic anomaly detection.
       </div>
     </div>
   );

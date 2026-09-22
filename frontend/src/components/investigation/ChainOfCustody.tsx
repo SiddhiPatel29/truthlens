@@ -40,7 +40,7 @@ export const ChainOfCustody: React.FC = () => {
       id: '3',
       time: '08:31:30 UTC',
       title: 'Multi-modal analysis pipeline started',
-      subtitle: 'Models: ResNet50 Spatial + Bi-LSTM Temporal + SyncNet Viseme',
+      subtitle: 'Engines: Spatial Artifact + Temporal Frame + Acoustic Signal Analysis',
       category: 'System',
       icon: Cpu,
     },
@@ -55,7 +55,7 @@ export const ChainOfCustody: React.FC = () => {
     {
       id: '5',
       time: '08:32:15 UTC',
-      title: 'Neural detection completed',
+      title: 'Forensic detection analysis completed',
       subtitle: 'Verdict: Synthetic Media Detected (Confidence: 98.2%)',
       hash: 'a71e89b2c01d4ef32a1567bc9812401f89bcdef123456789abcdef0123456789',
       category: 'Cryptographic',

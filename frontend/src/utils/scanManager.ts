@@ -112,7 +112,7 @@ const DEFAULT_VAULT: VaultEvidenceAsset[] = [
   },
   {
     id: 'ast_03',
-    name: 'gradcam_heatmap_18.png',
+    name: 'forensic_heatmap_18.png',
     size: '2.4 MB',
     type: 'Heatmap',
     date: 'Today',
@@ -156,7 +156,12 @@ export function getScanRecord(scanId: number | string): ForensicScanRecord | nul
     return active;
   }
 
-  return all[0] || null;
+  // Only return default if scanId was not provided or specifically matches default 821
+  if (!scanId || String(scanId) === '821') {
+    return all[0] || null;
+  }
+
+  return null;
 }
 
 export function getActiveScan(): ForensicScanRecord | null {
@@ -195,12 +200,13 @@ export function registerNewScan(
     rawResult?.is_deepfake ??
     rawResult?.is_synthetic_audio ??
     rawResult?.is_ai_generated ??
-    true;
+    (rawResult?.prediction ? rawResult.prediction === 'Fake' : false);
 
   const rawConf =
     rawResult?.confidence_score ??
     rawResult?.ai_confidence_score ??
-    94.8;
+    rawResult?.confidence ??
+    0;
   const normalizedConfidence = Math.min(99.9, rawConf > 1 ? rawConf : rawConf * 100);
 
   const riskLevel = isSynthetic

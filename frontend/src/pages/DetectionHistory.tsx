@@ -21,8 +21,9 @@ export const DetectionHistory: React.FC = () => {
     setLocalScans(getAllScans());
     try {
       const res = await getScans();
-      if (res.success && res.data && res.data.length > 0) {
-        setScans(res.data);
+      const items = Array.isArray(res?.data) ? res.data : (res?.data as any)?.items || [];
+      if (res.success && items.length > 0) {
+        setScans(items);
       }
     } catch {
       // Fallback to local scans

@@ -81,9 +81,9 @@ export const HumanReview: React.FC<HumanReviewProps> = ({ scanId = 821 }) => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
             {[
-              { key: 'spatialHeatmap', label: 'Grad-CAM++ Spatial Tamper Zones' },
+              { key: 'spatialHeatmap', label: 'Forensic Anomaly Spatial Tamper Zones' },
               { key: 'temporalAnomaly', label: 'Temporal Consistency Inter-frame Jitter' },
-              { key: 'lipSyncDesync', label: 'Audio-Visual Lip-Sync Desynchronization' },
+              { key: 'lipSyncDesync', label: 'Cross-Modal Consistency Discrepancy' },
               { key: 'c2paSignature', label: 'EXIF / C2PA Provenance Manifest Absence' },
             ].map((row) => {
               const checked = checklist[row.key as keyof typeof checklist];

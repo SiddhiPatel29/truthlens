@@ -60,11 +60,11 @@ export const VideoForensics: React.FC<VideoForensicsProps> = ({ data }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Activity size={18} color="var(--accent-blue)" />
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#ffffff' }}>
-              Video Temporal & Facial Tracking Forensics
+              Video Temporal Frame & Consistency Forensics
             </h3>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Bi-LSTM sequence analysis tracking landmark stability, inter-frame jitter, and optical flow continuity.
+            Temporal frame consistency analysis tracking inter-frame stability, visual jitter, and artifact continuity.
           </p>
         </div>
 

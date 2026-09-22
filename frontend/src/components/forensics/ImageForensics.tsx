@@ -15,7 +15,7 @@ export const ImageForensics: React.FC<ImageForensicsProps> = ({ data }) => {
   const sampleOriginal = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80';
   const heatmapUrl = data?.heatmap_preview || sampleOriginal;
 
-  const rawScore = data?.confidence_score ?? 0.937;
+  const rawScore = data?.confidence_score ?? 0;
   const probability = (rawScore > 1 ? rawScore : rawScore * 100).toFixed(1);
   const isHighRisk = Number(probability) > 75;
 
@@ -24,7 +24,7 @@ export const ImageForensics: React.FC<ImageForensicsProps> = ({ data }) => {
     { label: 'Color Space', value: 'sRGB IEC61966-2.1' },
     { label: 'Compression Profile', value: 'JPEG DCT Quantization (Standard Tables)' },
     { label: 'Color Subsampling', value: 'YCbCr 4:2:0' },
-    { label: 'C2PA Manifest', value: 'UNVERIFIED / STRIPPED (Potential tamper indicator)' },
+    { label: 'Digital Provenance', value: 'Not embedded / Standard format' },
     { label: 'Photometric Interpretation', value: 'RGB Matrix' },
   ];
 
@@ -36,11 +36,11 @@ export const ImageForensics: React.FC<ImageForensicsProps> = ({ data }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <ImageIcon size={18} color="var(--accent-blue)" />
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#ffffff' }}>
-              Image Pixel-Level & Spatial Tampering Analysis
+              Image Pixel-Level & Spatial Artifact Analysis
             </h3>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Error Level Analysis (ELA), Laplacian high-pass noise discrepancy, and ResNet-50 feature activations.
+            Error Level Analysis (ELA), Laplacian high-pass noise discrepancy, and spatial artifact anomaly heatmap.
           </p>
         </div>
 
@@ -110,7 +110,7 @@ export const ImageForensics: React.FC<ImageForensicsProps> = ({ data }) => {
               </div>
             )}
 
-            {/* Mode 3: Grad-CAM++ Heatmap */}
+            {/* Mode 3: Forensic Anomaly Heatmap */}
             {mode === 'Heatmap' && (
               <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                 <img

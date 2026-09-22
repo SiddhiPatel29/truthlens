@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -39,11 +39,20 @@ export const Settings: React.FC = () => {
     }
   })();
 
-  // Profile States
-  const [name, setName] = useState(savedSettings?.name || user?.name || 'Lead Examiner');
-  const [email, setEmail] = useState(savedSettings?.email || user?.email || 'admin@veramedia.ai');
-  const [agency, setAgency] = useState(savedSettings?.agency || 'Cyber Forensics & Threat Intelligence Unit');
-  const [bio, setBio] = useState(savedSettings?.bio || 'Certified Senior Forensic Analyst specializing in GAN synthesis, multimodal deepfakes, and C2PA provenance.');
+  // Profile States - connected to authenticated user from /api/auth/me
+  const [name, setName] = useState(savedSettings?.name || user?.name || 'Forensic Analyst');
+  const [email, setEmail] = useState(savedSettings?.email || user?.email || 'analyst@truthlens.local');
+  const [agency, setAgency] = useState(savedSettings?.agency || 'Digital Forensics Unit');
+  const [bio, setBio] = useState(savedSettings?.bio || 'Forensic examiner specializing in media verification, statistical signal analysis, and forensic artifact inspection.');
+
+  useEffect(() => {
+    if (user?.name && !savedSettings?.name) {
+      setName(user.name);
+    }
+    if (user?.email && !savedSettings?.email) {
+      setEmail(user.email);
+    }
+  }, [user]);
 
   // Security States
   const [currentPassword, setCurrentPassword] = useState('');
@@ -51,12 +60,12 @@ export const Settings: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [apiKey, setApiKey] = useState(savedSettings?.apiKey || 'vm_live_8f3b4c129e4a8b7c6d5e1f2a3b4c');
-  const [twoFactor, setTwoFactor] = useState(savedSettings?.twoFactor ?? true);
+  const [twoFactor, setTwoFactor] = useState(savedSettings?.twoFactor ?? false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   // Notifications States
-  const [emailAlerts, setEmailAlerts] = useState(savedSettings?.emailAlerts ?? true);
+  const [emailAlerts, setEmailAlerts] = useState(savedSettings?.emailAlerts ?? false);
   const [webhookAlerts, setWebhookAlerts] = useState(savedSettings?.webhookAlerts ?? true);
   const [webhookUrl, setWebhookUrl] = useState(savedSettings?.webhookUrl || 'https://hooks.slack.com/services/T00/B00/XXXX');
   const [soundAlerts, setSoundAlerts] = useState(savedSettings?.soundAlerts ?? false);
@@ -65,7 +74,7 @@ export const Settings: React.FC = () => {
 
   // Preferences States
   const [defaultThreshold, setDefaultThreshold] = useState(savedSettings?.defaultThreshold ?? 85);
-  const [exportStandard, setExportStandard] = useState(savedSettings?.exportStandard || 'C2PA-Authenticity v2.1');
+  const [exportStandard, setExportStandard] = useState(savedSettings?.exportStandard || 'SHA256-Digest');
   const [themeMode, setThemeMode] = useState(savedSettings?.themeMode || 'Cyber Dark (Default)');
   const [timezone, setTimezone] = useState(savedSettings?.timezone || 'UTC (Coordinated Universal Time)');
   const [autoCache, setAutoCache] = useState(savedSettings?.autoCache ?? true);
@@ -128,12 +137,30 @@ export const Settings: React.FC = () => {
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
-  const handleTestWebhook = () => {
-    setWebhookPingStatus('Sending test ping to webhook endpoint...');
-    setTimeout(() => {
-      setWebhookPingStatus('HTTP 200 OK — Test incident payload successfully acknowledged.');
+  const handleTestWebhook = async () => {
+    if (!webhookUrl || !webhookUrl.startsWith('http')) {
+      setWebhookPingStatus('Please enter a valid HTTP/HTTPS webhook endpoint URL.');
       setTimeout(() => setWebhookPingStatus(null), 3000);
-    }, 800);
+      return;
+    }
+    setWebhookPingStatus('Testing webhook connection from browser client...');
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'truthlens_ping',
+          timestamp: new Date().toISOString(),
+          message: 'TruthLens webhook test ping',
+        }),
+        mode: 'no-cors',
+      });
+      setWebhookPingStatus('Test webhook payload dispatched from browser client.');
+      setTimeout(() => setWebhookPingStatus(null), 3500);
+    } catch (err: any) {
+      setWebhookPingStatus(`Webhook transmission error: ${err?.message || 'Network request failed'}`);
+      setTimeout(() => setWebhookPingStatus(null), 4000);
+    }
   };
 
   const handleLogout = () => {
@@ -284,10 +311,10 @@ export const Settings: React.FC = () => {
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{email}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.35rem' }}>
                     <span className="badge badge-real" style={{ fontSize: '0.65rem' }}>
-                      <Shield size={10} /> Active Examiner Session
+                      <Shield size={10} /> Authenticated Session
                     </span>
                     <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>
-                      ID: #EXAM-2026-8812
+                      User ID: #{user?.user_id || 1}
                     </span>
                   </div>
                 </div>
@@ -318,7 +345,7 @@ export const Settings: React.FC = () => {
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    Authenticated Analyst Email
+                    Authenticated Analyst Email (JWT Identity #{user?.user_id || 1})
                   </label>
                   <input
                     type="email"
@@ -397,17 +424,30 @@ export const Settings: React.FC = () => {
           {activeTab === 'Security' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
               {/* Change Password Form */}
-              <form onSubmit={handlePasswordChange} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Lock size={18} color="var(--accent-blue)" />
-                  <span>Change Analyst Master Password</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Lock size={18} color="var(--accent-blue)" />
+                    <span>Analyst Account Password</span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '9999px',
+                      backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                      color: '#94a3b8',
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                    }}
+                  >
+                    Database Admin Managed
+                  </span>
                 </div>
 
-                {passwordSuccess && (
-                  <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.4)', color: '#86efac', padding: '0.6rem 1rem', borderRadius: '8px', fontSize: '0.8rem' }}>
-                    Analyst master credentials updated successfully!
-                  </div>
-                )}
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                  In the current self-hosted SQLite backend, user passwords are encrypted using Werkzeug/scrypt. Direct password resets are administered via the server CLI or database management.
+                </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
                   <div>
@@ -417,17 +457,18 @@ export const Settings: React.FC = () => {
                     <input
                       type="password"
                       placeholder="••••••••"
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      disabled
+                      value="••••••••••••"
                       style={{
                         width: '100%',
                         backgroundColor: 'var(--bg-dark)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '6px',
                         padding: '0.6rem 0.85rem',
-                        color: '#ffffff',
+                        color: 'var(--text-muted)',
                         fontSize: '0.85rem',
                         outline: 'none',
+                        cursor: 'not-allowed',
                       }}
                     />
                   </div>
@@ -436,72 +477,84 @@ export const Settings: React.FC = () => {
                     <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
                       New Password
                     </label>
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="••••••••"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        style={{
-                          width: '100%',
-                          backgroundColor: 'var(--bg-dark)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          padding: '0.6rem 2.5rem 0.6rem 0.85rem',
-                          color: '#ffffff',
-                          fontSize: '0.85rem',
-                          outline: 'none',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        style={{ position: 'absolute', right: '10px', top: '10px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                      >
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                      Confirm New Password
-                    </label>
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type="password"
                       placeholder="••••••••"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      disabled
+                      value=""
                       style={{
                         width: '100%',
                         backgroundColor: 'var(--bg-dark)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '6px',
                         padding: '0.6rem 0.85rem',
-                        color: '#ffffff',
+                        color: 'var(--text-muted)',
                         fontSize: '0.85rem',
                         outline: 'none',
+                        cursor: 'not-allowed',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                      Confirm Password
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="••••••••"
+                      disabled
+                      value=""
+                      style={{
+                        width: '100%',
+                        backgroundColor: 'var(--bg-dark)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        padding: '0.6rem 0.85rem',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.85rem',
+                        outline: 'none',
+                        cursor: 'not-allowed',
                       }}
                     />
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={!newPassword || !confirmPassword}
-                  className="btn-secondary"
-                  style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', fontSize: '0.8rem' }}
-                >
-                  <span>Update Password</span>
-                </button>
-              </form>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    disabled
+                    className="btn-secondary"
+                    style={{ alignSelf: 'flex-start', padding: '0.5rem 1.25rem', fontSize: '0.8rem', opacity: 0.6, cursor: 'not-allowed' }}
+                    title="Self-hosted backend does not expose a public password-reset endpoint."
+                  >
+                    <span>Password Reset (Admin CLI Only)</span>
+                  </button>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    No public password-change endpoint is exposed on the backend.
+                  </span>
+                </div>
+              </div>
 
               {/* API Key Management */}
               <div style={{ backgroundColor: 'var(--bg-dark)', borderRadius: '10px', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', fontWeight: 700, color: '#ffffff' }}>
                     <Key size={16} color="var(--accent-cyan)" />
-                    <span>Cryptographic API & Webhook Secret</span>
+                    <span>Client Identification Secret</span>
+                    <span
+                      style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                        color: '#94a3b8',
+                        border: '1px solid rgba(148, 163, 184, 0.3)',
+                      }}
+                    >
+                      Client-Side Only
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -527,27 +580,42 @@ export const Settings: React.FC = () => {
                   </button>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                  Required for automated platform takedown dispatch and C2PA evidence federation.
+                  Backend API routes strictly authenticate requests using JWT Bearer tokens. This client key is retained for local script and client identification.
                 </div>
               </div>
 
               {/* Hardware 2FA */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', backgroundColor: 'var(--bg-dark)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', backgroundColor: 'var(--bg-dark)', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <Shield size={20} color="var(--accent-green)" />
                   <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Hardware Security Key (FIDO2 / WebAuthn)</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Require physical YubiKey touch verification before signing evidentiary dossiers.</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Hardware Security Key (FIDO2 / WebAuthn)</div>
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                          color: '#facc15',
+                          border: '1px solid rgba(234, 179, 8, 0.3)',
+                        }}
+                      >
+                        Planned Specification
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      Physical security key integration is planned for future releases. Current authentication is secured via JWT.
+                    </div>
                   </div>
                 </div>
                 <input
                   type="checkbox"
-                  checked={twoFactor}
-                  onChange={(e) => {
-                    setTwoFactor(e.target.checked);
-                    saveToStorage({ twoFactor: e.target.checked });
-                  }}
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--accent-blue)', cursor: 'pointer' }}
+                  disabled
+                  checked={false}
+                  title="Hardware 2FA is not implemented in the current backend"
+                  style={{ width: '18px', height: '18px', opacity: 0.5, cursor: 'not-allowed' }}
                 />
               </div>
 
@@ -581,21 +649,34 @@ export const Settings: React.FC = () => {
               </div>
 
               {/* Email Alerts Toggle */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem', backgroundColor: 'var(--bg-dark)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem', backgroundColor: 'var(--bg-dark)', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '1rem' }}>
                 <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Critical Threat Email Dispatch Alerts</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Automated Threat Email Dispatch</div>
+                    <span
+                      style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                        color: '#94a3b8',
+                        border: '1px solid rgba(148, 163, 184, 0.3)',
+                      }}
+                    >
+                      No SMTP Configured
+                    </span>
+                  </div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Immediately send signed email alerts when deepfake confidence exceeds 90.0%.
+                    Outbound SMTP relay is not configured in this local deployment. Direct email alerts are currently offline.
                   </div>
                 </div>
                 <input
                   type="checkbox"
-                  checked={emailAlerts}
-                  onChange={(e) => {
-                    setEmailAlerts(e.target.checked);
-                    saveToStorage({ emailAlerts: e.target.checked });
-                  }}
-                  style={{ width: '18px', height: '18px', accentColor: 'var(--accent-blue)', cursor: 'pointer' }}
+                  disabled
+                  checked={false}
+                  title="No outbound SMTP relay is configured in the current backend"
+                  style={{ width: '18px', height: '18px', opacity: 0.5, cursor: 'not-allowed' }}
                 />
               </div>
 
@@ -606,7 +687,7 @@ export const Settings: React.FC = () => {
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Audio Alert Chime on Detection</div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Play high-priority acoustic alert sound when media analysis identifies synthetic tampering.
+                      Client-side audio notification preference stored in browser session.
                     </div>
                   </div>
                 </div>
@@ -623,10 +704,25 @@ export const Settings: React.FC = () => {
 
               {/* Webhook Configuration */}
               <div style={{ backgroundColor: 'var(--bg-dark)', borderRadius: '10px', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>SOC Webhook Relay (Slack / Discord / SIEM)</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>POST JSON payload to incident response channels.</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>Incident Webhook Relay (Slack / Discord / SIEM)</div>
+                      <span
+                        style={{
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '9999px',
+                          backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                          color: '#94a3b8',
+                          border: '1px solid rgba(148, 163, 184, 0.3)',
+                        }}
+                      >
+                        Client-Side Forwarding
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Forward incident alert payloads directly from the browser client to your webhook endpoint.</div>
                   </div>
                   <input
                     type="checkbox"
@@ -669,7 +765,7 @@ export const Settings: React.FC = () => {
                       </button>
                     </div>
                     {webhookPingStatus && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>
+                      <div style={{ fontSize: '0.75rem', color: webhookPingStatus.includes('error') ? '#fca5a5' : 'var(--accent-green)', fontFamily: 'var(--font-mono)' }}>
                         {webhookPingStatus}
                       </div>
                     )}
@@ -693,7 +789,7 @@ export const Settings: React.FC = () => {
               <div style={{ backgroundColor: 'var(--bg-dark)', borderRadius: '10px', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#ffffff' }}>
-                    Automated Takedown Eligibility Threshold
+                    Forensic Risk Triage Threshold
                   </label>
                   <span style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-blue)' }}>
                     {defaultThreshold}%
@@ -711,14 +807,14 @@ export const Settings: React.FC = () => {
                   style={{ width: '100%', accentColor: 'var(--accent-blue)', cursor: 'pointer' }}
                 />
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-                  Media dossiers scoring above this confidence level qualify for 1-click legal and platform abuse takedown.
+                  Media analyses scoring above this confidence level are flagged as high risk for analyst triage and abuse reporting.
                 </div>
               </div>
 
               {/* Forensic Standard */}
               <div style={{ backgroundColor: 'var(--bg-dark)', borderRadius: '10px', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  Default Cryptographic Export Standard
+                  Default Forensic Evidence Export Format
                 </label>
                 <select
                   value={exportStandard}
@@ -737,16 +833,19 @@ export const Settings: React.FC = () => {
                     outline: 'none',
                   }}
                 >
-                  <option value="C2PA-Authenticity v2.1">C2PA-Authenticity v2.1 (Coalition for Content Provenance)</option>
-                  <option value="NIST-AI-100-2">NIST AI 100-2 Profile (Federal Synthetic Media Specification)</option>
-                  <option value="IEEE-2838">IEEE 2838 Digital Forensic Evidence Standard</option>
+                  <option value="SHA256-Digest">SHA-256 Cryptographic Evidence Digest (TruthLens Native)</option>
+                  <option value="JSON-Forensic">Structured JSON Evidence Record (ISO/IEC 27037 compliant)</option>
+                  <option value="PDF-Summary">PDF Forensic Evidence Dossier Summary</option>
                 </select>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  Primary evidence digest and serialization format used for local reports and dossier export packages.
+                </div>
               </div>
 
               {/* Timezone */}
               <div style={{ backgroundColor: 'var(--bg-dark)', borderRadius: '10px', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  Evidence Ledger Timezone
+                  Evidence Timestamp Timezone
                 </label>
                 <select
                   value={timezone}
@@ -771,6 +870,9 @@ export const Settings: React.FC = () => {
                   <option value="GMT (Greenwich Mean Time)">GMT (London / Dublin)</option>
                   <option value="IST (Indian Standard Time)">IST (New Delhi / Mumbai)</option>
                 </select>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  Timezone formatting applied to recorded scan timestamps and forensic reports.
+                </div>
               </div>
             </div>
           )}

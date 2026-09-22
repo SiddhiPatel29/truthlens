@@ -59,14 +59,14 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#ffffff' }}>
-              Grad-CAM++ Spatial Heatmap Viewer
+              Forensic Anomaly Heatmap Viewer
             </h3>
             <span className="badge badge-critical" style={{ fontSize: '0.65rem' }}>
-              Activation Anomaly Peak: {(intensity * 0.96).toFixed(1)}%
+              Artifact Anomaly Peak: {(intensity * 0.96).toFixed(1)}%
             </span>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Pixel-level gradient localization highlighting face-swap blending seams and diffusion artifacts.
+            Pixel-level forensic anomaly localization highlighting visual artifact boundaries and blending seams.
           </p>
         </div>
 
@@ -195,7 +195,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({
               {/* Heatmap Frame */}
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--accent-red)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  GRAD-CAM++ ACTIVATION MAP ({intensity}% INTENSITY)
+                  FORENSIC ANOMALY HEATMAP ({intensity}% INTENSITY)
                 </div>
                 <div style={{ position: 'relative', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--accent-red)' }}>
                   <img
@@ -339,7 +339,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({
         {/* Heatmap Intensity Slider */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
-            <span>Activation Alpha Blending</span>
+            <span>Heatmap Alpha Blending</span>
             <span style={{ fontWeight: 700, color: 'var(--accent-red)' }}>{intensity}%</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

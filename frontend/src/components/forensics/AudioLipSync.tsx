@@ -66,28 +66,28 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Mic size={18} color="var(--accent-cyan)" />
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#ffffff' }}>
-              Audio-Visual Lip-Sync & Viseme Alignment
+              Audio Signal Analysis & Cross-Modal Consistency
             </h3>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            SyncNet cross-modal alignment checking phoneme speech acoustic burst against visual mouth geometry.
+            Acoustic signal and cross-modal consistency analysis tracking spectral variance and temporal alignment indicators.
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>OVERALL SYNC SCORE</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600 }}>CONSISTENCY SCORE</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 900, color: syncScore < 70 ? 'var(--accent-red)' : 'var(--accent-green)' }}>
               {syncScore}%
             </div>
           </div>
           {activeIssues.length > 0 ? (
             <span className="badge badge-fake">
-              <AlertTriangle size={12} /> {activeIssues.length} Desync Points
+              <AlertTriangle size={12} /> {activeIssues.length} Discrepancy Points
             </span>
           ) : (
             <span className="badge badge-real">
-              <CheckCircle2 size={12} /> Synchronized
+              <CheckCircle2 size={12} /> Consistent
             </span>
           )}
         </div>
@@ -104,7 +104,7 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
               style={{ padding: '4px 10px', fontSize: '0.75rem' }}
             >
               {isPlaying ? <Pause size={13} /> : <Play size={13} />}
-              <span>{isPlaying ? 'Pause Audio' : 'Play Audio Sync Track'}</span>
+              <span>{isPlaying ? 'Pause Audio' : 'Play Audio Signal Track'}</span>
             </button>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
               {((playheadPos / 100) * 45).toFixed(1)}s / 45.0s
@@ -114,11 +114,11 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
           <div style={{ display: 'flex', gap: '1rem', fontSize: '0.725rem' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: showAudioWave ? '#38bdf8' : 'var(--text-muted)' }}>
               <input type="checkbox" checked={showAudioWave} onChange={(e) => setShowAudioWave(e.target.checked)} style={{ display: 'none' }} />
-              <span>■ Audio Channel (Acoustic)</span>
+              <span>■ Acoustic Signal Wave</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: showVisemeWave ? '#f87171' : 'var(--text-muted)' }}>
               <input type="checkbox" checked={showVisemeWave} onChange={(e) => setShowVisemeWave(e.target.checked)} style={{ display: 'none' }} />
-              <span>■ Visual Viseme Track (Motion)</span>
+              <span>■ Cross-Modal Temporal Track</span>
             </label>
           </div>
         </div>
@@ -182,15 +182,15 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
         {/* Sync Timeline Track */}
         <div style={{ marginTop: '0.75rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-            <span>Acoustic Sync Timeline Track</span>
+            <span>Acoustic Signal & Temporal Track</span>
             <span>Offset Tolerance Filter: &gt; {toleranceMs}ms</span>
           </div>
           <div style={{ width: '100%', height: '10px', display: 'flex', borderRadius: '4px', overflow: 'hidden' }}>
-            <div style={{ width: '25%', backgroundColor: '#10b981' }} title="Synced" />
-            <div style={{ width: '15%', backgroundColor: '#ef4444' }} title="Desync Event 1 (320ms)" />
-            <div style={{ width: '20%', backgroundColor: '#10b981' }} title="Synced" />
-            <div style={{ width: '18%', backgroundColor: '#f59e0b' }} title="Desync Event 2 (180ms)" />
-            <div style={{ width: '22%', backgroundColor: '#10b981' }} title="Synced" />
+            <div style={{ width: '25%', backgroundColor: '#10b981' }} title="Consistent" />
+            <div style={{ width: '15%', backgroundColor: '#ef4444' }} title="Discrepancy Event 1 (320ms)" />
+            <div style={{ width: '20%', backgroundColor: '#10b981' }} title="Consistent" />
+            <div style={{ width: '18%', backgroundColor: '#f59e0b' }} title="Discrepancy Event 2 (180ms)" />
+            <div style={{ width: '22%', backgroundColor: '#10b981' }} title="Consistent" />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '4px' }}>
             <span>00:00.0</span>
@@ -220,7 +220,7 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
           <Sliders size={18} color="var(--accent-blue)" />
           <div>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#ffffff' }}>
-              Sync Anomaly Sensitivity Threshold: {toleranceMs} ms
+              Cross-Modal Sensitivity Threshold: {toleranceMs} ms
             </div>
             <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
               Ignore natural micro-latencies below this acoustic threshold.
@@ -246,7 +246,7 @@ export const AudioLipSync: React.FC<AudioLipSyncProps> = ({ data }) => {
       {/* Desync Segments Table (Interactive Selection) */}
       <div>
         <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-          DETECTED ACOUSTIC DESYNCHRONIZATION EVENTS (CLICK TO INSPECT)
+          DETECTED CROSS-MODAL DISCREPANCY EVENTS (CLICK TO INSPECT)
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {discrepancies.map((d, i) => {

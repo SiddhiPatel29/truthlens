@@ -9,6 +9,7 @@ import { ChainOfCustody } from '../components/investigation/ChainOfCustody';
 import { RiskAssessment } from '../components/investigation/RiskAssessment';
 import { HumanReview } from '../components/investigation/HumanReview';
 import { getScanRecord, ForensicScanRecord } from '../utils/scanManager';
+import { getScanById } from '../api/scans';
 import {
   FileText,
   Film,
@@ -40,13 +41,52 @@ export const Investigations: React.FC = () => {
   const [forensicFilter, setForensicFilter] = useState<'focused' | 'all'>('focused');
 
   useEffect(() => {
-    const record = getScanRecord(scanId);
-    setScanRecord(record);
+    let isMounted = true;
+    const local = getScanRecord(scanId);
+    if (local && (String(local.id) === String(scanId) || !scanId)) {
+      setScanRecord(local);
+      return;
+    }
+
+    getScanById(scanId)
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.success && res.data) {
+          const s = res.data;
+          const conf = s.result?.confidence ?? 0;
+          const normalizedConf = conf > 1 ? conf : conf * 100;
+          const record: ForensicScanRecord = {
+            id: s.id,
+            media_type: s.media_type,
+            filename: s.filename || `Evidence_Asset_${s.id}`,
+            filesize: 'Recorded Asset',
+            created_at: s.created_at || new Date().toISOString(),
+            sha256: s.result?.result_data?.sha256 || '9f4cd3e9f4ca8d4e5f6789012345678abcdef0123456789abcdef0123456789',
+            prediction: (s.result?.prediction as any) || 'Fake',
+            confidence: Number(normalizedConf.toFixed(1)),
+            risk_level: (s.result?.risk_level as any) || 'High',
+            status: s.status === 'COMPLETED' ? 'Reviewed' : 'Pending',
+            raw_result: s.result?.result_data || {},
+          };
+          setScanRecord(record);
+        } else if (local) {
+          setScanRecord(local);
+        }
+      })
+      .catch(() => {
+        if (isMounted && local) {
+          setScanRecord(local);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [scanId]);
 
   const modality = scanRecord?.media_type || 'video';
   const isSynthetic = scanRecord?.prediction === 'Fake';
-  const confidence = scanRecord?.confidence || 98.2;
+  const confidence = scanRecord?.confidence ?? 0;
   const filename = scanRecord?.filename || 'evidence_asset.mp4';
   const filesize = scanRecord?.filesize || '18.4 MB';
   const sha256 = scanRecord?.sha256 || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -56,24 +96,24 @@ export const Investigations: React.FC = () => {
     modality === 'video'
       ? {
           title: 'Synthetic Identity Deepfake & Video Tampering Inquest',
-          desc: 'Bi-LSTM inter-frame sequence temporal jitter and Grad-CAM++ facial landmark boundary analysis.',
+          desc: 'Temporal frame consistency analysis, inter-frame jitter tracking, and visual artifact anomaly detection.',
           icon: Film,
         }
       : modality === 'audio'
       ? {
-          title: 'Acoustic Voice Synthesis & Phoneme Desync Inquest',
-          desc: 'SyncNet acoustic-phonemic viseme correlation and neural vocoder spectral discrepancy.',
+          title: 'Acoustic Voice Synthesis & Signal Anomaly Inquest',
+          desc: 'Audio WAV signal analysis, spectral energy variance, and cross-modal consistency indicators.',
           icon: Mic,
         }
       : modality === 'image'
       ? {
           title: 'Spatial Tampering & Pixel Residual Inquest',
-          desc: 'Error Level Analysis (ELA), Laplacian high-pass noise residual, and ResNet-50 feature activation maps.',
+          desc: 'Error Level Analysis (ELA), Laplacian high-pass noise residual, and forensic anomaly heatmap.',
           icon: ImageIcon,
         }
       : {
-          title: 'Neural Linguistic & LLM Synthetics Inquest',
-          desc: 'RoBERTa token perplexity estimation, sentence burstiness variance, and n-gram lexical diversity.',
+          title: 'Statistical Linguistic & Text Forensics Inquest',
+          desc: 'Statistical text analysis, sentence burstiness variance, and linguistic pattern indicators.',
           icon: FileText,
         };
 
@@ -83,40 +123,40 @@ export const Investigations: React.FC = () => {
       return [
         { name: filename, size: filesize, icon: Film, type: 'Video Source Asset', hash: sha256 },
         { name: `extracted_keyframe_018.jpg`, size: '1.8 MB', icon: ImageIcon, type: 'Keyframe Anomaly', hash: sha256.slice(0, 32) + '1818' },
-        { name: `gradcam_heatmap_layer4.png`, size: '2.4 MB', icon: Layers, type: 'Spatial Heatmap', hash: sha256.slice(0, 32) + '4444' },
+        { name: `forensic_anomaly_heatmap.png`, size: '2.4 MB', icon: Layers, type: 'Spatial Heatmap', hash: sha256.slice(0, 32) + '4444' },
         { name: `extracted_audio_track.wav`, size: '1.2 MB', icon: Mic, type: 'Acoustic Track', hash: sha256.slice(0, 32) + '2222' },
-        { name: `forensic_c2pa_dossier_VM-${scanId}.pdf`, size: '2.4 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
+        { name: `forensic_evidence_dossier_VM-${scanId}.pdf`, size: '2.4 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
       ];
     }
     if (modality === 'audio') {
       return [
         { name: filename, size: filesize, icon: Mic, type: 'Audio WAV Source Asset', hash: sha256 },
         { name: `spectrogram_spectrum.png`, size: '1.4 MB', icon: Layers, type: 'Mel-Spectrogram Map', hash: sha256.slice(0, 32) + '3333' },
-        { name: `syncnet_discrepancy_log.json`, size: '28 KB', icon: FileText, type: 'Formant Viseme Log', hash: sha256.slice(0, 32) + '7777' },
-        { name: `forensic_c2pa_dossier_VM-${scanId}.pdf`, size: '2.1 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
+        { name: `signal_consistency_log.json`, size: '28 KB', icon: FileText, type: 'Signal Consistency Log', hash: sha256.slice(0, 32) + '7777' },
+        { name: `forensic_evidence_dossier_VM-${scanId}.pdf`, size: '2.1 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
       ];
     }
     if (modality === 'image') {
       return [
         { name: filename, size: filesize, icon: ImageIcon, type: 'Source Image Asset', hash: sha256 },
-        { name: `gradcam_spatial_heatmap.png`, size: '2.4 MB', icon: Layers, type: 'Spatial Activation Map', hash: sha256.slice(0, 32) + '4444' },
+        { name: `spatial_artifact_heatmap.png`, size: '2.4 MB', icon: Layers, type: 'Forensic Anomaly Heatmap', hash: sha256.slice(0, 32) + '4444' },
         { name: `ela_compression_residual.jpg`, size: '1.6 MB', icon: ImageIcon, type: 'ELA Error Level Map', hash: sha256.slice(0, 32) + '5555' },
-        { name: `exif_c2pa_provenance.json`, size: '12 KB', icon: FileText, type: 'Cryptographic Provenance', hash: sha256.slice(0, 32) + '8888' },
-        { name: `forensic_c2pa_dossier_VM-${scanId}.pdf`, size: '2.2 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
+        { name: `exif_metadata_provenance.json`, size: '12 KB', icon: FileText, type: 'Cryptographic Provenance', hash: sha256.slice(0, 32) + '8888' },
+        { name: `forensic_evidence_dossier_VM-${scanId}.pdf`, size: '2.2 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
       ];
     }
     return [
       { name: filename, size: filesize, icon: FileText, type: 'Submitted Text Document', hash: sha256 },
-      { name: `roberta_token_entropy.json`, size: '36 KB', icon: FileText, type: 'Perplexity Matrix', hash: sha256.slice(0, 32) + '6666' },
+      { name: `text_entropy_metrics.json`, size: '36 KB', icon: FileText, type: 'Statistical Entropy Matrix', hash: sha256.slice(0, 32) + '6666' },
       { name: `burstiness_breakdown.csv`, size: '8 KB', icon: FileText, type: 'Sentence Burstiness Metrics', hash: sha256.slice(0, 32) + '1111' },
-      { name: `forensic_c2pa_dossier_VM-${scanId}.pdf`, size: '1.9 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
+      { name: `forensic_evidence_dossier_VM-${scanId}.pdf`, size: '1.9 MB', icon: FileText, type: 'Evidence Dossier', hash: sha256.slice(0, 32) + '9999' },
     ];
   };
 
   const evidenceFiles = getEvidenceFiles();
 
   const handleDownloadFile = (fileName: string) => {
-    const dummyBlob = new Blob([`C2PA Certified Evidence Hash for ${fileName}\nSHA-256: ${sha256}\nCase ID: VM-2026-00${scanId}`], { type: 'text/plain' });
+    const dummyBlob = new Blob([`Forensic Evidence Manifest for ${fileName}\nSHA-256: ${sha256}\nCase ID: VM-2026-00${scanId}`], { type: 'text/plain' });
     const url = URL.createObjectURL(dummyBlob);
     const a = document.createElement('a');
     a.href = url;
@@ -332,7 +372,7 @@ export const Investigations: React.FC = () => {
                   cursor: 'pointer',
                 }}
               >
-                Show All 5 Modality Diagnostics
+                Show All Modality Diagnostics
               </button>
             </div>
           </div>

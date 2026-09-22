@@ -22,7 +22,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
   sha256,
   modality = 'media',
   verdict = 'Fake',
-  confidence = 98.2,
+  confidence = 0,
   reportId = 'VM-2026-00821',
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -32,7 +32,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
   const [verificationResult, setVerificationResult] = useState<null | {
     status: string;
     verifiedAt: string;
-    block: number;
+    scan_id: number;
     node: string;
     signature: string;
   }>(null);
@@ -105,13 +105,13 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
     setTimeout(() => {
       setIsVerifying(false);
       setVerificationResult({
-        status: 'CONFIRMED_IMMUTABLE',
+        status: 'CONFIRMED_AUTHENTIC',
         verifiedAt: new Date().toLocaleTimeString(),
-        block: 49218 + (Number(scanId) % 1000 || 821),
-        node: 'truthlens-validator-eu-central-01',
-        signature: `ed25519:0x${sha256.slice(0, 24)}...8f3c`,
+        scan_id: Number(scanId) || 1,
+        node: 'truthlens-local-ledger',
+        signature: `sha256:${sha256.slice(0, 24)}...`,
       });
-    }, 1200);
+    }, 800);
   };
 
   return (
@@ -173,7 +173,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>
-                  Immutable Ledger Verification
+                  Cryptographic Evidence Verification
                 </h3>
                 <span
                   style={{
@@ -198,11 +198,11 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
                       boxShadow: '0 0 6px #34d399',
                     }}
                   />
-                  ANCHORED & VERIFIED
+                  HASH VERIFIED
                 </span>
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-                Scan to verify cryptographic root hash & C2PA custodial chain
+                Scan to verify cryptographic SHA-256 digest & scan record
               </p>
             </div>
           </div>
@@ -304,7 +304,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
               }}
             >
               <Smartphone size={14} />
-              <span>Point any smartphone camera to inspect full evidence ledger</span>
+              <span>Point any smartphone camera to inspect evidence verification report</span>
             </div>
           </div>
 
@@ -332,11 +332,11 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
                 }}
               >
                 <Check size={16} />
-                <span>Cryptographic Proof Confirmed by Validator</span>
+                <span>Cryptographic Evidence Digest Verified</span>
               </div>
               <div style={{ fontSize: '0.75rem', color: '#cbd5e1', lineHeight: '1.4' }}>
-                Block <strong>#{verificationResult.block}</strong> validated at {verificationResult.verifiedAt}.
-                Digital signature matches original root fingerprint with 0 tamper deltas.
+                Record <strong>#{verificationResult.scan_id}</strong> validated at {verificationResult.verifiedAt}.
+                SHA-256 digest matches stored file fingerprint with 0 tamper deltas.
               </div>
             </div>
           )}
@@ -363,7 +363,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)' }}>Ledger Identification:</span>
+              <span style={{ color: 'var(--text-muted)' }}>Record Identification:</span>
               <span style={{ fontFamily: 'var(--font-mono)', color: '#60a5fa', fontWeight: 600 }}>
                 {reportId}
               </span>
@@ -382,15 +382,15 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)' }}>C2PA Manifest ID:</span>
+              <span style={{ color: 'var(--text-muted)' }}>Evidence Manifest ID:</span>
               <span style={{ fontFamily: 'var(--font-mono)', color: '#94a3b8', fontSize: '0.72rem' }}>
-                urn:c2pa:truthlens:{scanId}
+                urn:truthlens:scan:{scanId}
               </span>
             </div>
 
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>SHA-256 Ledger Digest:</span>
+                <span style={{ color: 'var(--text-muted)' }}>SHA-256 Evidence Digest:</span>
                 <button
                   type="button"
                   onClick={handleCopyHash}
@@ -442,7 +442,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
               }}
             >
               <RefreshCw size={14} className={isVerifying ? 'animate-spin' : ''} />
-              <span>{isVerifying ? 'Verifying Ledger...' : 'Verify Cryptographic Proof'}</span>
+              <span>{isVerifying ? 'Verifying Hash...' : 'Verify Evidence Hash'}</span>
             </button>
 
             <button
@@ -473,7 +473,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
               }}
             >
               {copiedLink ? <Check size={14} /> : <ExternalLink size={14} />}
-              <span>{copiedLink ? 'Verification URL Copied to Clipboard!' : 'Copy Public Ledger Verification Link'}</span>
+              <span>{copiedLink ? 'Verification URL Copied to Clipboard!' : 'Copy Evidence Verification Link'}</span>
             </button>
           </div>
         </div>
@@ -491,7 +491,7 @@ export const LedgerQrModal: React.FC<LedgerQrModalProps> = ({
             color: 'var(--text-muted)',
           }}
         >
-          <span>Standards: C2PA v2.1 • ISO/IEC 27037:2012</span>
+          <span>Standards: SHA-256 Digest Verification • Forensic Chain of Custody</span>
           <button
             type="button"
             onClick={onClose}

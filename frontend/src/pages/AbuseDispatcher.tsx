@@ -12,12 +12,16 @@ export const AbuseDispatcher: React.FC = () => {
   const [category, setCategory] = useState('Synthetic Impersonation & Manipulated Media');
   const [analystNotes, setAnalystNotes] = useState(
     searchParams.get('notes') ||
-      'Automated deepfake face-swap verified with Grad-CAM++ activation maps and cross-modal lip-sync desync.'
+      'Automated synthetic media detection flagged visual/acoustic anomalies with elevated confidence.'
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const confidence = Number(searchParams.get('confidence')) || 0.982;
+  const rawConf = searchParams.get('confidence');
+  const confidence = rawConf ? (Number(rawConf) > 1 ? Number(rawConf) / 100 : Number(rawConf)) : 0.85;
+
+  const scanIdParam = searchParams.get('scanId') || searchParams.get('scan_id');
+  const scanIdNum = scanIdParam ? parseInt(scanIdParam, 10) : undefined;
 
   const platforms = [
     { id: 'youtube', label: 'YouTube', icon: Youtube, color: '#ef4444' },
@@ -44,6 +48,7 @@ export const AbuseDispatcher: React.FC = () => {
         category,
         confidence_score: confidence,
         analyst_notes: analystNotes,
+        ...(scanIdNum && !isNaN(scanIdNum) ? { scan_id: scanIdNum } : {}),
       });
 
       if (res.success && res.data) 

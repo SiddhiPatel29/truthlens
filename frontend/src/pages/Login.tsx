@@ -12,8 +12,14 @@ export const Login: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const { login, register } = useAuth();
+  const { login, register, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,8 +215,8 @@ export const Login: React.FC = () => {
                   Password
                 </label>
                 {!isRegisterMode && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-blue)', cursor: 'pointer' }}>
-                    Forgot Password?
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }} title="Authentication is managed by local SQLite database. Contact system administrator for password resets.">
+                    Self-Hosted Auth
                   </span>
                 )}
               </div>

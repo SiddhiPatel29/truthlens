@@ -72,7 +72,7 @@ export const Dashboard: React.FC = () => {
       try {
         const res = await getScans();
         if (res && res.success && res.data) {
-          apiScans = Array.isArray(res.data) ? res.data : (res.data as any).scans || [];
+          apiScans = Array.isArray(res.data) ? res.data : (res.data as any).items || (res.data as any).scans || [];
         }
       } catch {
         // Fallback to offline ledger
@@ -98,121 +98,204 @@ export const Dashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // Compute dynamic stats based on selected timeRange
+  // Filter scans based on selected timeRange
+  const filteredScans = useMemo(() => {
+    const validScans = Array.isArray(scans) ? scans : [];
+    if (timeRange === 'All') return validScans;
+    const now = Date.now();
+    return validScans.filter((s) => {
+      const createdAt = new Date(s.created_at).getTime();
+      if (isNaN(createdAt)) return true;
+      const diffDays = (now - createdAt) / (1000 * 60 * 60 * 24);
+      if (timeRange === 'Today') return diffDays <= 1;
+      if (timeRange === '7D') return diffDays <= 7;
+      if (timeRange === '30D') return diffDays <= 30;
+      if (timeRange === '90D') return diffDays <= 90;
+      return true;
+    });
+  }, [scans, timeRange]);
+
+  // Compute truthful telemetry statistics from actual scan records
   const telemetryData = useMemo(() => {
-    const multipliers: Record<TimeRange, { total: number; fake: number; real: number; uncertain: number; label: string }> = {
-      Today: { total: 42, fake: 21, real: 17, uncertain: 4, label: 'Hourly Scans' },
-      '7D': { total: 1248, fake: 652, real: 482, uncertain: 114, label: 'Daily Volume' },
-      '30D': { total: 5420, fake: 2810, real: 2190, uncertain: 420, label: 'Weekly Volume' },
-      '90D': { total: 18940, fake: 9840, real: 7850, uncertain: 1250, label: 'Monthly Volume' },
-      All: { total: 42810, fake: 22410, real: 17900, uncertain: 2500, label: 'Aggregate Volume' },
+    const rangeLabels: Record<TimeRange, string> = {
+      Today: 'Last 24 Hours',
+      '7D': 'Last 7 Days',
+      '30D': 'Last 30 Days',
+      '90D': 'Last 90 Days',
+      All: 'All Recorded Scans',
     };
 
-    const base = multipliers[timeRange] || multipliers['7D'];
-    const validScans = Array.isArray(scans) ? scans : [];
+    const fakes = filteredScans.filter((s) => {
+      const p = s.result?.prediction || (s as any).prediction;
+      return p === 'Fake';
+    }).length;
 
-    if (validScans.length > 0) {
-      const fakes = validScans.filter((s) => {
-        const p = s.result?.prediction || (s as any).prediction;
-        return p === 'Fake';
+    const reals = filteredScans.filter((s) => {
+      const p = s.result?.prediction || (s as any).prediction;
+      return p === 'Real';
+    }).length;
+
+    const uncertains = filteredScans.filter((s) => {
+      const p = s.result?.prediction || (s as any).prediction;
+      return p !== 'Fake' && p !== 'Real';
+    }).length;
+
+    return {
+      total: filteredScans.length,
+      fake: fakes,
+      real: reals,
+      uncertain: uncertains,
+      label: rangeLabels[timeRange] || 'Recorded Scans',
+    };
+  }, [filteredScans, timeRange]);
+
+  // Compute average confidence and high risk counts from real scan data
+  const { avgConfidence, highRiskCount } = useMemo(() => {
+    const confList = filteredScans
+      .map((s) => {
+        const c = s.result?.confidence ?? (s as any).confidence;
+        return typeof c === 'number' ? (c > 1 ? c : c * 100) : 0;
+      })
+      .filter((c) => c > 0);
+
+    const avg = confList.length > 0
+      ? (confList.reduce((a, b) => a + b, 0) / confList.length).toFixed(1)
+      : '0.0';
+
+    const highRisks = filteredScans.filter((s) => {
+      const r = s.result?.risk_level || (s as any).risk_level;
+      return r === 'Critical' || r === 'High';
+    }).length;
+
+    return { avgConfidence: avg, highRiskCount: highRisks };
+  }, [filteredScans]);
+
+  // Dynamic trend lines based on time range and real scan distribution
+  const trendPoints = useMemo(() => {
+    if (timeRange === 'Today') {
+      const hourBuckets = ['00h', '04h', '08h', '12h', '16h', '20h', 'Now'];
+      const counts = [0, 0, 0, 0, 0, 0, 0];
+      filteredScans.forEach((s) => {
+        const d = new Date(s.created_at);
+        if (!isNaN(d.getTime())) {
+          const hour = d.getHours();
+          const bucketIdx = Math.min(6, Math.floor(hour / 4));
+          counts[bucketIdx]++;
+        }
+      });
+      const maxVal = Math.max(...counts, 1);
+      return hourBuckets.map((label, idx) => ({
+        day: label,
+        val: counts[idx],
+        x: 20 + Math.round((idx / 6) * 450),
+        y: counts[idx] === 0 ? 135 : 135 - Math.round((counts[idx] / maxVal) * 95),
+      }));
+    }
+
+    if (timeRange === '30D') {
+      const weekBuckets = ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Current'];
+      const counts = [0, 0, 0, 0, 0];
+      const now = Date.now();
+      filteredScans.forEach((s) => {
+        const d = new Date(s.created_at).getTime();
+        if (!isNaN(d)) {
+          const daysAgo = (now - d) / (1000 * 60 * 60 * 24);
+          const bucket = Math.min(4, Math.floor(daysAgo / 6));
+          counts[4 - bucket]++;
+        }
+      });
+      const maxVal = Math.max(...counts, 1);
+      return weekBuckets.map((label, idx) => ({
+        day: label,
+        val: counts[idx],
+        x: 20 + Math.round((idx / 4) * 450),
+        y: counts[idx] === 0 ? 135 : 135 - Math.round((counts[idx] / maxVal) * 95),
+      }));
+    }
+
+    if (timeRange === '90D' || timeRange === 'All') {
+      const monthBuckets = ['Month -3', 'Month -2', 'Month -1', 'Latest'];
+      const counts = [0, 0, 0, 0];
+      const now = Date.now();
+      filteredScans.forEach((s) => {
+        const d = new Date(s.created_at).getTime();
+        if (!isNaN(d)) {
+          const daysAgo = (now - d) / (1000 * 60 * 60 * 24);
+          const bucket = Math.min(3, Math.floor(daysAgo / 30));
+          counts[3 - bucket]++;
+        }
+      });
+      const maxVal = Math.max(...counts, 1);
+      return monthBuckets.map((label, idx) => ({
+        day: label,
+        val: counts[idx],
+        x: 20 + Math.round((idx / 3) * 450),
+        y: counts[idx] === 0 ? 135 : 135 - Math.round((counts[idx] / maxVal) * 95),
+      }));
+    }
+
+    // Default: 7D
+    const days: { day: string; dateStr: string; val: number; x: number; y: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dateStr = d.toISOString().slice(0, 10);
+      const count = filteredScans.filter((s) => {
+        const sDate = new Date(s.created_at).toISOString().slice(0, 10);
+        return sDate === dateStr;
       }).length;
+      days.push({
+        day: dayName,
+        dateStr,
+        val: count,
+        x: 20 + Math.round(((6 - i) / 6) * 450),
+        y: 135,
+      });
+    }
+    const maxVal = Math.max(...days.map((d) => d.val), 1);
+    days.forEach((d) => {
+      d.y = d.val === 0 ? 135 : 135 - Math.round((d.val / maxVal) * 95);
+    });
+    return days;
+  }, [filteredScans, timeRange]);
 
-      const reals = validScans.filter((s) => {
-        const p = s.result?.prediction || (s as any).prediction;
-        return p === 'Real';
-      }).length;
+  const polylineStr = trendPoints.map((p) => `${p.x},${p.y}`).join(' ');
+  const firstPt = trendPoints[0] || { x: 20, y: 135 };
+  const lastPt = trendPoints[trendPoints.length - 1] || { x: 470, y: 135 };
+  const polygonStr = `${firstPt.x},150 ` + polylineStr + ` ${lastPt.x},150`;
 
-      const uncertains = validScans.filter((s) => {
-        const p = s.result?.prediction || (s as any).prediction;
-        return p === 'Uncertain';
-      }).length;
+  // Dynamic Modality statistics from real scan counts
+  const modalityData = useMemo(() => {
+    const videoCount = filteredScans.filter((s) => s.media_type === 'video').length;
+    const audioCount = filteredScans.filter((s) => s.media_type === 'audio').length;
+    const imageCount = filteredScans.filter((s) => s.media_type === 'image').length;
+    const textCount = filteredScans.filter((s) => s.media_type === 'text').length;
+    const totalAll = videoCount + audioCount + imageCount + textCount;
 
+    if (totalAll === 0) {
       return {
-        total: base.total + validScans.length,
-        fake: base.fake + fakes,
-        real: base.real + reals,
-        uncertain: base.uncertain + uncertains,
-        label: base.label,
+        video: { pct: 25, count: 0, color: '#3b82f6', label: 'Video Frame Analysis' },
+        audio: { pct: 25, count: 0, color: '#06b6d4', label: 'Audio Signal Analysis' },
+        image: { pct: 25, count: 0, color: '#10b981', label: 'Image Artifact Analysis' },
+        text: { pct: 25, count: 0, color: '#f59e0b', label: 'Statistical Text Analysis' },
+        total: 0,
       };
     }
 
-    return base;
-  }, [scans, timeRange]);
-
-  // Dynamic trend lines based on time range
-  const trendPoints = useMemo(() => {
-    switch (timeRange) {
-      case 'Today':
-        return [
-          { day: '00h', val: 3, x: 20, y: 130 },
-          { day: '04h', val: 2, x: 95, y: 135 },
-          { day: '08h', val: 8, x: 170, y: 100 },
-          { day: '12h', val: 14, x: 245, y: 65 },
-          { day: '16h', val: 11, x: 320, y: 80 },
-          { day: '20h', val: 18, x: 395, y: 40 },
-          { day: 'Now', val: 22, x: 470, y: 25 },
-        ];
-      case '30D':
-        return [
-          { day: 'W1', val: 1120, x: 20, y: 110 },
-          { day: 'W2', val: 1340, x: 132, y: 90 },
-          { day: 'W3', val: 1480, x: 245, y: 75 },
-          { day: 'W4', val: 1780, x: 357, y: 45 },
-          { day: 'Current', val: 1940, x: 470, y: 30 },
-        ];
-      case '90D':
-      case 'All':
-        return [
-          { day: 'M-2', val: 4200, x: 20, y: 120 },
-          { day: 'M-1', val: 6100, x: 170, y: 85 },
-          { day: 'M-0', val: 8640, x: 320, y: 45 },
-          { day: 'Latest', val: 9800, x: 470, y: 20 },
-        ];
-      default: // 7D
-        return [
-          { day: 'Mon', val: 142, x: 20, y: 115 },
-          { day: 'Tue', val: 128, x: 95, y: 125 },
-          { day: 'Wed', val: 168, x: 170, y: 85 },
-          { day: 'Thu', val: 154, x: 245, y: 95 },
-          { day: 'Fri', val: 210, x: 320, y: 45 },
-          { day: 'Sat', val: 184, x: 395, y: 70 },
-          { day: 'Sun', val: 262, x: 470, y: 25 },
-        ];
-    }
-  }, [timeRange]);
-
-  const polylineStr = trendPoints.map((p) => `${p.x},${p.y}`).join(' ');
-  const firstPt = trendPoints[0] || { x: 20, y: 120 };
-  const lastPt = trendPoints[trendPoints.length - 1] || { x: 470, y: 30 };
-  const polygonStr = `${firstPt.x},150 ` + polylineStr + ` ${lastPt.x},150`;
-
-  // Dynamic Modality statistics
-  const modalityData = useMemo(() => {
-    const validScans = Array.isArray(scans) ? scans : [];
-    const videoCount = validScans.filter((s) => s.media_type === 'video').length;
-    const audioCount = validScans.filter((s) => s.media_type === 'audio').length;
-    const imageCount = validScans.filter((s) => s.media_type === 'image').length;
-    const textCount = validScans.filter((s) => s.media_type === 'text').length;
-
-    const baseTotal = telemetryData.total;
-    const videoTotal = Math.round(baseTotal * 0.45) + videoCount;
-    const audioTotal = Math.round(baseTotal * 0.28) + audioCount;
-    const imageTotal = Math.round(baseTotal * 0.16) + imageCount;
-    const textTotal = Math.round(baseTotal * 0.11) + textCount;
-    const totalAll = videoTotal + audioTotal + imageTotal + textTotal || 1;
+    const videoPct = Math.round((videoCount / totalAll) * 100);
+    const audioPct = Math.round((audioCount / totalAll) * 100);
+    const imagePct = Math.round((imageCount / totalAll) * 100);
+    const textPct = Math.max(0, 100 - videoPct - audioPct - imagePct);
 
     return {
-      video: { pct: Math.round((videoTotal / totalAll) * 100), count: videoTotal, color: '#3b82f6', label: 'Video Synthetics' },
-      audio: { pct: Math.round((audioTotal / totalAll) * 100), count: audioTotal, color: '#06b6d4', label: 'Voice Clones / Lip-Sync' },
-      image: { pct: Math.round((imageTotal / totalAll) * 100), count: imageTotal, color: '#10b981', label: 'Diffusion Blends' },
-      text: {
-        pct: Math.max(1, 100 - Math.round((videoTotal / totalAll) * 100) - Math.round((audioTotal / totalAll) * 100) - Math.round((imageTotal / totalAll) * 100)),
-        count: textTotal,
-        color: '#f59e0b',
-        label: 'AI LLM Generated',
-      },
+      video: { pct: videoPct, count: videoCount, color: '#3b82f6', label: 'Video Frame Analysis' },
+      audio: { pct: audioPct, count: audioCount, color: '#06b6d4', label: 'Audio Signal Analysis' },
+      image: { pct: imagePct, count: imageCount, color: '#10b981', label: 'Image Artifact Analysis' },
+      text: { pct: textPct, count: textCount, color: '#f59e0b', label: 'Statistical Text Analysis' },
+      total: totalAll,
     };
-  }, [scans, telemetryData.total]);
+  }, [filteredScans]);
 
   const getModalityIcon = (type: string) => {
     switch (type?.toLowerCase()) {
@@ -248,7 +331,7 @@ export const Dashboard: React.FC = () => {
             <div className="pulse-green" title="Live Telemetry Active" />
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-            Real-time synthetic media detection telemetry, aggregate verification metrics, and threat dispatch.
+            Forensic analysis operations, aggregate verification metrics, and threat intelligence dispatch.
           </p>
         </div>
 
@@ -318,8 +401,8 @@ export const Dashboard: React.FC = () => {
           <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff' }}>
             {telemetryData.total.toLocaleString()}
           </div>
-          <div style={{ fontSize: '0.725rem', color: 'var(--accent-green)', marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <ArrowUpRight size={14} /> +12.4% vs prev period
+          <div style={{ fontSize: '0.725rem', color: 'var(--accent-cyan)', marginTop: '0.35rem' }}>
+            {telemetryData.label}
           </div>
         </div>
 
@@ -349,7 +432,7 @@ export const Dashboard: React.FC = () => {
             {telemetryData.fake.toLocaleString()}
           </div>
           <div style={{ fontSize: '0.725rem', color: 'var(--accent-red)', marginTop: '0.35rem' }}>
-            Confirmed synthetic markers
+            Confirmed synthetic indicators
           </div>
         </div>
 
@@ -364,7 +447,7 @@ export const Dashboard: React.FC = () => {
             {telemetryData.uncertain.toLocaleString()}
           </div>
           <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            Awaiting human examination
+            Awaiting analyst review
           </div>
         </div>
       </div>
@@ -380,32 +463,35 @@ export const Dashboard: React.FC = () => {
       >
         <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>AVG. CONFIDENCE</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ffffff', margin: '0.25rem 0' }}>89.4%</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ffffff', margin: '0.25rem 0' }}>{avgConfidence}%</div>
           <div style={{ width: '100%', height: '4px', backgroundColor: '#1e293b', borderRadius: '2px', overflow: 'hidden' }}>
-            <div style={{ width: '89.4%', height: '100%', backgroundColor: 'var(--accent-blue)', transition: 'width 0.5s' }} />
+            <div style={{ width: `${avgConfidence}%`, height: '100%', backgroundColor: 'var(--accent-blue)', transition: 'width 0.5s' }} />
           </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>Based on recorded scans</div>
         </div>
 
         <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>THROUGHPUT RATE</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ffffff', margin: '0.25rem 0' }}>4.8 scans/min</div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Sub-500ms pipeline latency</div>
-        </div>
-
-        <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>DOSSIERS DISPATCHED</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ffffff', margin: '0.25rem 0' }}>
-            {Math.round(telemetryData.fake * 0.14)}
-          </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)' }}>100% C2PA cryptographic audit</div>
-        </div>
-
-        <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>HIGH RISK THREATS</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>HIGH RISK DETECTIONS</div>
           <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-red)', margin: '0.25rem 0' }}>
-            {Math.round(telemetryData.fake * 0.28)}
+            {highRiskCount}
           </div>
-          <div style={{ fontSize: '0.7rem', color: 'var(--accent-red)' }}>Immediate triage recommended</div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--accent-red)' }}>Critical & elevated risk scans</div>
+        </div>
+
+        <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>ANALYSIS ENGINES</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ffffff', margin: '0.25rem 0' }}>
+            4 Active
+          </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)' }}>Video, Audio, Image, Text</div>
+        </div>
+
+        <div className="forensic-card" style={{ padding: '1rem 1.25rem' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>DATABASE LEDGER</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent-cyan)', margin: '0.25rem 0' }}>
+            SQLite
+          </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Local forensic scan persistence</div>
         </div>
       </div>
 
@@ -517,7 +603,7 @@ export const Dashboard: React.FC = () => {
               <PieChart size={18} color="var(--accent-cyan)" />
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>Modality Distribution</h3>
             </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>4 Synthetics Pipelines</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>4 Forensic Analysis Engines</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', height: '210px' }}>
@@ -596,10 +682,10 @@ export const Dashboard: React.FC = () => {
                 }}
               >
                 <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
-                  {activeModalityHover ? `${modalityData[activeModalityHover].pct}%` : '100%'}
+                  {activeModalityHover ? `${modalityData[activeModalityHover].pct}%` : `${modalityData.total}`}
                 </span>
                 <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  {activeModalityHover || 'Total'}
+                  {activeModalityHover || (modalityData.total === 1 ? 'Scan' : 'Total Scans')}
                 </span>
               </div>
             </div>
@@ -649,10 +735,10 @@ export const Dashboard: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>
-              Recent Forensic Detections & Live Ledger Stream
+              Recent Forensic Detections & Scan Records
             </h3>
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-              Live chronological feed of all analyzed media, cryptographic verdicts, and immutable ledger proofs.
+              Chronological feed of analyzed media, forensic verdicts, and verification records.
             </p>
           </div>
           <button
@@ -660,7 +746,7 @@ export const Dashboard: React.FC = () => {
             className="btn-secondary"
             style={{ fontSize: '0.75rem', padding: '0.4rem 0.75rem' }}
           >
-            <span>View Full Ledger</span>
+            <span>View Full History</span>
             <ArrowRight size={13} />
           </button>
         </div>
@@ -689,10 +775,10 @@ export const Dashboard: React.FC = () => {
                 {scans.slice(0, 5).map((s) => {
                   const pred = s.result?.prediction || (s as any).prediction || 'Fake';
                   const isFake = pred === 'Fake';
-                  const rawConf = s.result?.confidence ?? (s as any).confidence ?? 94.8;
+                  const rawConf = s.result?.confidence ?? (s as any).confidence ?? 0;
                   const confPct = rawConf > 1 ? rawConf.toFixed(1) : (rawConf * 100).toFixed(1);
                   const filename = s.filename || `Evidence_Asset_${s.id}`;
-                  const hash = (s as any).sha256 || '9f4cd3e9f4ca8d4e5f6789012345678abcdef0123456789abcdef0123456789';
+                  const hash = (s as any).sha256 || s.result?.result_data?.sha256 || '9f4cd3e9f4ca8d4e5f6789012345678abcdef0123456789abcdef0123456789';
 
                   return (
                     <tr
@@ -741,7 +827,7 @@ export const Dashboard: React.FC = () => {
                               })
                             }
                             className="btn-secondary"
-                            title="Scan QR Code to verify immutable ledger"
+                            title="View verification QR code"
                             style={{ padding: '0.35rem 0.55rem', fontSize: '0.75rem', borderColor: 'rgba(59, 130, 246, 0.4)', color: '#93c5fd' }}
                           >
                             <QrCode size={13} />
@@ -834,7 +920,7 @@ export const Dashboard: React.FC = () => {
             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.2rem' }}>
               Escalate Abuse Takedown
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Transmit dossier to YouTube, X, Meta</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Generate platform takedown report</div>
           </div>
           <Send size={20} color="var(--accent-red)" />
         </div>
@@ -852,15 +938,15 @@ export const Dashboard: React.FC = () => {
         >
           <div>
             <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.2rem' }}>
-              Export PDF Dossier
+              Export Evidence Dossier
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Cryptographically signed court report</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Forensic evidence report summary</div>
           </div>
           <FileText size={20} color="var(--accent-green)" />
         </div>
       </div>
 
-      {/* Immutable Ledger QR Modal */}
+      {/* Evidence Verification QR Modal */}
       {qrModalScan && (
         <LedgerQrModal
           isOpen={true}

@@ -3,9 +3,22 @@ import { ApiResponse, ScanSummary } from '../types';
 
 export async function getScans(): Promise<ApiResponse<ScanSummary[]>> {
   try {
-    return await request<ScanSummary[]>('/api/scans', {
+    const res = await request<any>('/api/scans', {
       method: 'GET',
     });
+    if (res.success && res.data) {
+      const items: ScanSummary[] = Array.isArray(res.data)
+        ? res.data
+        : (res.data.items || res.data.scans || []);
+      return {
+        ...res,
+        data: items,
+      };
+    }
+    return {
+      ...res,
+      data: Array.isArray(res.data) ? res.data : [],
+    };
   } catch (err: any) {
     if (err?.errorCode === 'NETWORK_ERROR' || err?.message?.includes('Cannot connect')) {
       return {

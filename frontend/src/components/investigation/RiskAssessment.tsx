@@ -5,9 +5,9 @@ export const RiskAssessment: React.FC = () => {
   // Configurable risk factor values
   const [factors, setFactors] = useState([
     { key: 'ai', label: 'AI Confidence Score', weight: 0.35, percent: 98, level: 'CRITICAL', color: '#ef4444' },
-    { key: 'face', label: 'Face Manipulation (Grad-CAM++)', weight: 0.25, percent: 95, level: 'HIGH', color: '#ef4444' },
+    { key: 'face', label: 'Spatial Artifact Anomaly (Forensic Heatmap)', weight: 0.25, percent: 95, level: 'HIGH', color: '#ef4444' },
     { key: 'temporal', label: 'Temporal Sequence Inconsistency', weight: 0.20, percent: 88, level: 'HIGH', color: '#ef4444' },
-    { key: 'lipsync', label: 'Audio-Visual Lip-Sync Mismatch', weight: 0.12, percent: 61, level: 'MEDIUM', color: '#f59e0b' },
+    { key: 'lipsync', label: 'Cross-Modal Consistency Indicator', weight: 0.12, percent: 61, level: 'MEDIUM', color: '#f59e0b' },
     { key: 'metadata', label: 'EXIF & C2PA Provenance Anomaly', weight: 0.08, percent: 24, level: 'LOW', color: '#10b981' },
   ]);
 
@@ -48,9 +48,9 @@ export const RiskAssessment: React.FC = () => {
   const resetDefaults = () => {
     setFactors([
       { key: 'ai', label: 'AI Confidence Score', weight: 0.35, percent: 98, level: 'CRITICAL', color: '#ef4444' },
-      { key: 'face', label: 'Face Manipulation (Grad-CAM++)', weight: 0.25, percent: 95, level: 'HIGH', color: '#ef4444' },
+      { key: 'face', label: 'Spatial Artifact Anomaly (Forensic Heatmap)', weight: 0.25, percent: 95, level: 'HIGH', color: '#ef4444' },
       { key: 'temporal', label: 'Temporal Sequence Inconsistency', weight: 0.20, percent: 88, level: 'HIGH', color: '#ef4444' },
-      { key: 'lipsync', label: 'Audio-Visual Lip-Sync Mismatch', weight: 0.12, percent: 61, level: 'MEDIUM', color: '#f59e0b' },
+      { key: 'lipsync', label: 'Cross-Modal Consistency Indicator', weight: 0.12, percent: 61, level: 'MEDIUM', color: '#f59e0b' },
       { key: 'metadata', label: 'EXIF & C2PA Provenance Anomaly', weight: 0.08, percent: 24, level: 'LOW', color: '#10b981' },
     ]);
   };
@@ -63,7 +63,7 @@ export const RiskAssessment: React.FC = () => {
             Multi-Factor Forensic Risk Assessment
           </h3>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Weighted aggregation across facial landmarks, temporal jitter, audio-visual sync, and EXIF structure.
+            Weighted aggregation across spatial artifacts, temporal consistency, cross-modal indicators, and metadata structure.
           </p>
         </div>
 

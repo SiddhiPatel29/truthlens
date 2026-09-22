@@ -29,7 +29,8 @@ export const DetectionResult: React.FC<DetectionResultProps> = ({ modality, resu
     scanRecord?.confidence ??
     result?.confidence_score ??
     result?.ai_confidence_score ??
-    94.8;
+    result?.confidence ??
+    0;
 
   const normalizedScore = rawConfidence > 1 ? rawConfidence : rawConfidence * 100;
   const confidencePercent = Math.min(99.9, normalizedScore).toFixed(1);
@@ -226,9 +227,9 @@ export const DetectionResult: React.FC<DetectionResultProps> = ({ modality, resu
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.65rem 0', borderBottom: '1px solid #1e293b' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Model Used</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Analysis Method</span>
             <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#cbd5e1' }}>
-              {modality === 'video' ? 'ResNet50 + Bi-LSTM' : modality === 'audio' ? 'SyncNet + Wav2Vec' : modality === 'text' ? 'RoBERTa-Entropy' : 'Grad-CAM++ Spatial'}
+              {modality === 'video' ? 'Frame Sampling & Artifact Tracking' : modality === 'audio' ? 'Signal & Spectral Variance' : modality === 'text' ? 'Statistical Linguistic Forensics' : 'Spatial Artifact & Noise Residual'}
             </span>
           </div>
 

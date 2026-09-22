@@ -26,7 +26,7 @@ export async function detectImage(file: File): Promise<ApiResponse<ImageDetectio
           confidence_score: 94.8,
           manipulation_type: 'Deepfake Diffusion Blend',
           image_dimensions: { width: 1920, height: 1080 },
-          heatmap_preview: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="%23111827"/><circle cx="200" cy="150" r="80" fill="%23ef4444" opacity="0.6"/><text x="130" y="155" fill="white" font-size="14" font-family="sans-serif">Grad-CAM++ Anomaly</text></svg>',
+          heatmap_preview: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="%23111827"/><circle cx="200" cy="150" r="80" fill="%23ef4444" opacity="0.6"/><text x="110" y="155" fill="white" font-size="14" font-family="sans-serif">Forensic Artifact Anomaly</text></svg>',
         },
         error_code: null,
       };
@@ -90,15 +90,7 @@ export async function detectAudio(file: File): Promise<ApiResponse<AudioDetectio
             zero_crossing_rate: 0.042,
             energy_variance: 0.18,
           },
-          lip_sync_discrepancies: [
-            {
-              start_timestamp: '00:02.15',
-              end_timestamp: '00:03.40',
-              measured_offset_ms: 180,
-              severity: 'HIGH',
-              description: 'Phoneme /b/ articulatory mismatch with visual lip closure',
-            },
-          ],
+          lip_sync_discrepancies: [],
         },
         error_code: null,
       };

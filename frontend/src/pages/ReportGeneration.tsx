@@ -65,7 +65,7 @@ export const ReportGeneration: React.FC = () => {
   const filename = scanRecord?.filename || 'evidence_asset.mp4';
   const modality = scanRecord?.media_type || 'video';
   const isSynthetic = scanRecord?.prediction === 'Fake';
-  const confidence = scanRecord?.confidence || 98.2;
+  const confidence = scanRecord?.confidence ?? 0;
   const sha256 = scanRecord?.sha256 || '9f4cd3e9f4ca8d4e5f6789012345678abcdef0123456789abcdef0123456789';
 
   const toggleSection = (key: keyof typeof sections) => {
@@ -77,10 +77,10 @@ export const ReportGeneration: React.FC = () => {
   };
 
   const handleDownloadC2PA = () => {
-    const c2paPackage = {
-      manifest_id: `urn:c2pa:manifest:${reportId}`,
-      standard: 'C2PA-Authenticity v2.1',
-      compliance: 'NIST-AI-100-2',
+    const manifestPackage = {
+      manifest_id: `urn:truthlens:manifest:${reportId}`,
+      standard: 'TruthLens Forensic Verification Protocol v1',
+      compliance: 'ISO/IEC 27037:2012 Digital Evidence',
       case_identifier: reportId,
       analyzed_asset: {
         filename,
@@ -93,8 +93,7 @@ export const ReportGeneration: React.FC = () => {
       cryptographic_anchor: {
         hash_algorithm: 'SHA-256',
         media_hash: sha256,
-        digital_signature: `sig_ed25519_${sha256.slice(0, 32)}`,
-        public_key: '03a107f3c73e102c80634f1555bcb72440f70a3e0dd9025414a083e2928241f',
+        evidence_signature: `sha256:${sha256.slice(0, 32)}`,
       },
       verdict: {
         classification: isSynthetic ? 'SYNTHETIC_MEDIA_DETECTED' : 'AUTHENTIC_CONTENT_VERIFIED',
@@ -104,11 +103,11 @@ export const ReportGeneration: React.FC = () => {
       exported_at: new Date().toISOString(),
     };
 
-    const blob = new Blob([JSON.stringify(c2paPackage, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(manifestPackage, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${reportId}_C2PA_Certificate.json`;
+    a.download = `${reportId}_Forensic_Manifest.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -151,7 +150,7 @@ export const ReportGeneration: React.FC = () => {
                 Cryptographic Proof Successfully Verified
               </div>
               <div style={{ color: '#cbd5e1', fontSize: '0.78rem' }}>
-                This report matches the immutable SHA-256 root on VeraMedia Decentralized Ledger (Block #{49218 + (Number(numericId) % 1000 || 821)}). No tampering detected.
+                This report matches the cryptographic SHA-256 digest recorded for Scan #{numericId}. Evidence integrity verified.
               </div>
             </div>
           </div>
@@ -482,7 +481,7 @@ export const ReportGeneration: React.FC = () => {
               style={{ width: '100%', padding: '0.75rem', fontSize: '0.85rem', justifyContent: 'center' }}
             >
               <Download size={16} />
-              <span>Download C2PA JSON Manifest</span>
+              <span>Download Forensic JSON Manifest</span>
             </button>
             <button
               type="button"
@@ -500,7 +499,7 @@ export const ReportGeneration: React.FC = () => {
               }}
             >
               <QrCode size={17} />
-              <span>Verify On Immutable Ledger (QR Code)</span>
+              <span>Verify Evidence Hash (QR Code)</span>
             </button>
           </div>
         </div>

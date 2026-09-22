@@ -125,7 +125,7 @@ export const Sidebar: React.FC = () => {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div className="pulse-green" />
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#e2e8f0' }}>AI Status: Online</span>
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#e2e8f0' }}>System Status: Online</span>
         </div>
         <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>v1.0.0</span>
       </div>

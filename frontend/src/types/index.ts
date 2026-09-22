@@ -109,6 +109,7 @@ export interface AbuseDossierRequest {
   category: string;
   confidence_score: number;
   analyst_notes: string;
+  scan_id?: number;
 }
 
 export interface AbuseDossierResponse {

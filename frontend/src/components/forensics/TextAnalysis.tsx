@@ -12,7 +12,7 @@ export const TextAnalysis: React.FC<TextAnalysisProps> = ({ data }) => {
   const [customInput, setCustomInput] = useState<string>('');
   const [isTestingCustom, setIsTestingCustom] = useState<boolean>(false);
 
-  const rawScore = data?.ai_confidence_score ?? 0.876;
+  const rawScore = data?.ai_confidence_score ?? (data as any)?.confidence_score ?? 0;
   const probability = (rawScore > 1 ? rawScore : rawScore * 100).toFixed(1);
   const burstiness = data?.metrics?.burstiness_index ?? 92.4;
   const lexicalDiversity = data?.metrics?.lexical_diversity ?? 0.64;
@@ -69,11 +69,11 @@ export const TextAnalysis: React.FC<TextAnalysisProps> = ({ data }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <FileText size={18} color="var(--accent-amber)" />
             <h3 style={{ fontSize: '1.125rem', fontWeight: 700, color: '#ffffff' }}>
-              Text Synthetics & Neural Linguistic Forensics
+              Statistical Text & Linguistic Pattern Forensics
             </h3>
           </div>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Sentence burstiness variance, n-gram lexical diversity, and RoBERTa token predictability metrics.
+            Sentence burstiness variance, n-gram lexical diversity, and statistical predictability metrics.
           </p>
         </div>
 
